@@ -295,7 +295,7 @@ public class CatmullSpline {
         var multi = (float)subSection / (float)subSplineCount;
         var startT = (float)start / (float)subSplineCount;
         var t = subT * multi + startT;
-        return GetDistanceFromTime(t);
+        return GetDistanceFromTime(t) - GetDistanceFromTime(startT);
     }
 
     public static void GizmosDrawSpline(CatmullSpline spline, Color splineColor, Color knotColor, float knotSize = 0.025f) {
