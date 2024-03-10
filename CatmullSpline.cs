@@ -12,8 +12,18 @@ public class CatmullSpline {
     private float[] distanceLUT = new float[DISTANCE_LUT_COUNT];
     private Vector3[] binormalLUT = new Vector3[BINORMAL_LUT_COUNT];
     private List<Bounds> bounds = new();
-    public float arcLength {get; private set;}
-    
+
+    private float _arcLength;
+    public float arcLength {
+        get {
+            if (!distanceLUTGenerated) {
+                GenerateDistanceLUT();
+            }
+            return _arcLength;
+        }
+        private set => _arcLength = value;
+    }
+
     private static Matrix4x4 catmullMatrix = new Matrix4x4(
         new Vector4(0f, 2f, 0f, 0f)*0.5f,
         new Vector4(-1f, 0f, 1f, 0f)*0.5f,
@@ -190,8 +200,8 @@ public class CatmullSpline {
             lastPosition = position;
             distanceLUT[i] = dist;
         }
-        arcLength = dist;
         distanceLUTGenerated = true;
+        arcLength = dist;
     }
     protected void GenerateBinormalLUT() {
         // https://en.wikipedia.org/wiki/Frenet%E2%80%93Serret_formulas
