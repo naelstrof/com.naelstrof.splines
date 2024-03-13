@@ -209,9 +209,12 @@ public class CatmullSpline {
         // https://janakiev.com/blog/framing-parametric-curves/
         Vector3 lastTangent = GetVelocityFromT(0).normalized;
         // Initial reference frame, uses Vector3.up
-        Vector3 lastBinormal = Vector3.Cross(GetVelocityFromT(0),Vector3.up).normalized;
-        if (lastBinormal.magnitude == 0f) {
-            lastBinormal = Vector3.Cross(GetVelocityFromT(0),Vector3.right).normalized;
+        Vector3 lastBinormal = Vector3.Cross(GetVelocityFromT(0),GetAccelerationFromT(0)).normalized;
+        if (lastBinormal == Vector3.zero) {
+            lastBinormal = Vector3.Cross(GetVelocityFromT(0),Vector3.up).normalized;
+        }
+        if (lastBinormal == Vector3.zero) {
+            lastBinormal = Vector3.Cross(GetVelocityFromT(0),-Vector3.forward).normalized;
         }
         for(int i=0;i<BINORMAL_LUT_COUNT;i++) {
             float t = (((float)i)/(float)BINORMAL_LUT_COUNT-1);
