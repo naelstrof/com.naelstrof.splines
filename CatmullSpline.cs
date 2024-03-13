@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -140,7 +141,7 @@ public class CatmullSpline {
         if (distance > 0f && distance < arcLength) {
             for(int i=0;i<DISTANCE_LUT_COUNT-1;i++) {
                 if (distance>distanceLUT[i] && distance<distanceLUT[i+1]) {
-                    return Remap(distance,distanceLUT[i],distanceLUT[i+1],(float)i/(float)(DISTANCE_LUT_COUNT),(float)(i+1)/(float)(DISTANCE_LUT_COUNT));
+                    return Remap(distance,distanceLUT[i],distanceLUT[i+1],(float)i/(float)(DISTANCE_LUT_COUNT-1),(float)(i+1)/(float)(DISTANCE_LUT_COUNT-1));
                 }
             }
         }
@@ -152,7 +153,7 @@ public class CatmullSpline {
         }
         t = Mathf.Clamp01(t);
         int index = Mathf.Clamp(Mathf.FloorToInt(t*(DISTANCE_LUT_COUNT-1)),0,DISTANCE_LUT_COUNT-2);
-        float offseted = t-((float)index/(float)(DISTANCE_LUT_COUNT));
+        float offseted = t-((float)index/(float)(DISTANCE_LUT_COUNT-1));
         float lerpT = offseted * (float)(DISTANCE_LUT_COUNT-1);
         return Mathf.Lerp(distanceLUT[index], distanceLUT[index+1], lerpT);
     }
@@ -194,7 +195,7 @@ public class CatmullSpline {
         float dist = 0f;
         Vector3 lastPosition = GetPositionFromT(0f);
         for(int i=0;i<DISTANCE_LUT_COUNT;i++) {
-            float t = (((float)i)/(float)DISTANCE_LUT_COUNT);
+            float t = (((float)i)/((float)DISTANCE_LUT_COUNT-1));
             Vector3 position = GetPositionFromT(t);
             dist += Vector3.Distance(lastPosition, position);
             lastPosition = position;
@@ -213,7 +214,7 @@ public class CatmullSpline {
             lastBinormal = Vector3.Cross(GetVelocityFromT(0),Vector3.right).normalized;
         }
         for(int i=0;i<BINORMAL_LUT_COUNT;i++) {
-            float t = (((float)i)/(float)BINORMAL_LUT_COUNT);
+            float t = (((float)i)/(float)BINORMAL_LUT_COUNT-1);
             Vector3 tangent = GetVelocityFromT(t).normalized;
             Vector3 binormal = Vector3.Cross(lastTangent, tangent);
             if (binormal.magnitude == 0f) {
@@ -289,41 +290,17 @@ public class CatmullSpline {
             weightCollection.Add(pointMatrix*GenerateCentripetalCatmullMatrixFast( Remap(0f, interval1/distance, interval2/distance, 0f, 1f), Remap(1f, interval1/distance, interval2/distance, 0f, 1f)));
         }
     }
-    public float GetDistanceFromSubT(int start, int end, float subT) {
-        var subSplineCount = weights.Count;
-        var subSection = end - start;
-        var multi = (float)subSection / (float)subSplineCount;
-        var startT = (float)start / (float)subSplineCount;
+    public float GetLengthFromSubsection(int subsectionCount, int subsectionIndex = 0, float subT = 1f) {
+        var multi = (float)subsectionCount / (float)weights.Count;
+        var startT = (float)subsectionIndex / (float)weights.Count;
         var t = subT * multi + startT;
         return GetDistanceFromTime(t) - GetDistanceFromTime(startT);
     }
 
-    public static void GizmosDrawSpline(CatmullSpline spline, Color splineColor, Color knotColor, float knotSize = 0.025f) {
-        var oldColor = Gizmos.color;
-        Gizmos.color = splineColor;
-        Vector3 lastPoint = spline.GetPositionFromT(0f);
-        for (int i = 0; i <= 64; i++) {
-            Vector3 newPoint = spline.GetPositionFromT((float)i / 64f);
-            Gizmos.DrawLine(lastPoint, newPoint);
-            lastPoint = newPoint;
-        }
-
-        var save = Gizmos.matrix;
-        foreach(var weight in spline.GetWeights()) {
-            Vector3 pointA = GetPosition(weight, 0f);
-            Vector3 normalA = GetVelocity(weight, 0f);
-            Gizmos.color = knotColor;
-            Gizmos.matrix = Matrix4x4.TRS(pointA, Quaternion.FromToRotation(Vector3.forward, normalA.normalized), Vector3.one - Vector3.forward * 0.8f);
-            Gizmos.DrawCube(Vector3.zero, Vector3.one*knotSize);
-            if (spline.GetWeights().IndexOf(weight) == spline.GetWeights().Count - 1) {
-                Vector3 pointB = CatmullSpline.GetPosition(weight, 1f);
-                Vector3 normalB = CatmullSpline.GetVelocity(weight, 1f);
-                Gizmos.matrix = Matrix4x4.TRS(pointB, Quaternion.FromToRotation(Vector3.forward, normalB.normalized), Vector3.one - Vector3.forward * 0.8f);
-                Gizmos.DrawCube(Vector3.zero, Vector3.one*knotSize);
-            }
-        }
-        Gizmos.matrix = save;
-        Gizmos.color = oldColor;
+    [Obsolete("Please use GetLengthFromSubsection instead.")]
+    public float GetDistanceFromSubT(int start, int end, float subT) {
+        int count = end - start;
+        return GetLengthFromSubsection(count, start, subT);
     }
 
     public CatmullSpline SetWeightsFromPoints(IList<Vector3> newPoints) {
@@ -404,7 +381,7 @@ public class CatmullSpline {
             GenerateBinormalLUT();
         }
         var index = Mathf.Clamp(Mathf.FloorToInt(t*(BINORMAL_LUT_COUNT-1)),0,BINORMAL_LUT_COUNT-2);
-        var offseted = t-((float)index/(float)(BINORMAL_LUT_COUNT));
+        var offseted = t-((float)index/(float)(BINORMAL_LUT_COUNT-1));
         var lerpT = offseted * (float)(BINORMAL_LUT_COUNT-1);
         return Vector3.Lerp(binormalLUT[index], binormalLUT[index+1], lerpT);
     }
@@ -422,5 +399,101 @@ public class CatmullSpline {
         bezierBasis[3,3] = 1f;
         // Change of basis formula is B = P⁻¹ * A * P, where P is the basis transform.
         return bezierBasis.inverse;
+    }
+    
+    private const float knotSize = 0.025f;
+    private static void DrawBox(Vector3 position, Quaternion rotation, Vector3 extents, Color color) {
+        Debug.DrawLine(rotation*new Vector3(-extents.x, extents.y, -extents.z)+position, rotation*new Vector3(extents.x, extents.y, -extents.z)+position, color);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, extents.y, -extents.z)+position, rotation*new Vector3(-extents.x, extents.y, extents.z)+position, color);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, extents.y, extents.z)+position, rotation*new Vector3(extents.x, extents.y, extents.z)+position, color);
+        Debug.DrawLine(rotation*new Vector3(extents.x, extents.y, -extents.z)+position, rotation*new Vector3(extents.x, extents.y, extents.z)+position, color);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, -extents.y, -extents.z)+position, rotation*new Vector3(-extents.x, extents.y, -extents.z)+position, color);
+        Debug.DrawLine(rotation*new Vector3(extents.x, -extents.y, -extents.z)+position, rotation*new Vector3(extents.x, extents.y, -extents.z)+position, color);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, -extents.y, extents.z)+position, rotation*new Vector3(-extents.x, extents.y, extents.z)+position, color);
+        Debug.DrawLine(rotation*new Vector3(extents.x, -extents.y, extents.z)+position, rotation*new Vector3(extents.x, extents.y, extents.z)+position, color);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, -extents.y, -extents.z)+position, rotation*new Vector3(extents.x, -extents.y, -extents.z)+position, color);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, -extents.y, -extents.z)+position, rotation*new Vector3(-extents.x, -extents.y, extents.z)+position, color);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, -extents.y, extents.z)+position, rotation*new Vector3(extents.x, -extents.y, extents.z)+position, color);
+        Debug.DrawLine(rotation*new Vector3(extents.x, -extents.y, -extents.z)+position, rotation*new Vector3(extents.x, -extents.y, extents.z)+position, color);
+    }
+    private static void DrawBox(Vector3 position, Quaternion rotation, Vector3 extents, Color color, float duration) {
+        Debug.DrawLine(rotation*new Vector3(-extents.x, extents.y, -extents.z)+position, rotation*new Vector3(extents.x, extents.y, -extents.z)+position, color, duration);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, extents.y, -extents.z)+position, rotation*new Vector3(-extents.x, extents.y, extents.z)+position, color, duration);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, extents.y, extents.z)+position, rotation*new Vector3(extents.x, extents.y, extents.z)+position, color, duration);
+        Debug.DrawLine(rotation*new Vector3(extents.x, extents.y, -extents.z)+position, rotation*new Vector3(extents.x, extents.y, extents.z)+position, color, duration);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, -extents.y, -extents.z)+position, rotation*new Vector3(-extents.x, extents.y, -extents.z)+position, color, duration);
+        Debug.DrawLine(rotation*new Vector3(extents.x, -extents.y, -extents.z)+position, rotation*new Vector3(extents.x, extents.y, -extents.z)+position, color, duration);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, -extents.y, extents.z)+position, rotation*new Vector3(-extents.x, extents.y, extents.z)+position, color, duration);
+        Debug.DrawLine(rotation*new Vector3(extents.x, -extents.y, extents.z)+position, rotation*new Vector3(extents.x, extents.y, extents.z)+position, color, duration);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, -extents.y, -extents.z)+position, rotation*new Vector3(extents.x, -extents.y, -extents.z)+position, color, duration);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, -extents.y, -extents.z)+position, rotation*new Vector3(-extents.x, -extents.y, extents.z)+position, color, duration);
+        Debug.DrawLine(rotation*new Vector3(-extents.x, -extents.y, extents.z)+position, rotation*new Vector3(extents.x, -extents.y, extents.z)+position, color, duration);
+        Debug.DrawLine(rotation*new Vector3(extents.x, -extents.y, -extents.z)+position, rotation*new Vector3(extents.x, -extents.y, extents.z)+position, color, duration);
+    }
+    public static void DebugDrawSpline(CatmullSpline spline, Color splineColor, Color knotColor) {
+        Vector3 current = spline.GetPositionFromT(0f);
+        for (int i = 1; i < 64; i++) {
+            Vector3 next = spline.GetPositionFromT((float)i / 63);
+            Debug.DrawLine(current, next, splineColor);
+            current = next;
+        }
+
+        foreach (var weight in spline.GetWeights()) {
+            var startPos = GetPosition(weight, 0f);
+            var startVel = GetVelocity(weight, 0f).normalized;
+            var startAccel = GetAcceleration(weight, 0f).normalized;
+            DrawBox(startPos, Quaternion.LookRotation(startVel, startAccel), (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor);
+        }
+        var endPos = GetPosition(spline.GetWeights()[^1], 1f);
+        var endVel = GetVelocity(spline.GetWeights()[^1], 1f).normalized;
+        var endAccel = GetAcceleration(spline.GetWeights()[^1], 1f).normalized;
+        DrawBox(endPos, Quaternion.LookRotation(endVel, endAccel), (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor);
+    }
+    public static void DebugDrawSpline(CatmullSpline spline, Color splineColor, Color knotColor, float duration) {
+        Vector3 current = spline.GetPositionFromT(0f);
+        for (int i = 1; i < 64; i++) {
+            Vector3 next = spline.GetPositionFromT((float)i / 63);
+            Debug.DrawLine(current, next, splineColor, duration);
+            current = next;
+        }
+
+        foreach (var weight in spline.GetWeights()) {
+            var startPos = GetPosition(weight, 0f);
+            var startVel = GetVelocity(weight, 0f).normalized;
+            var startAccel = GetAcceleration(weight, 0f).normalized;
+            DrawBox(startPos, Quaternion.LookRotation(startVel, startAccel), (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor, duration);
+        }
+        var endPos = GetPosition(spline.GetWeights()[^1], 1f);
+        var endVel = GetVelocity(spline.GetWeights()[^1], 1f).normalized;
+        var endAccel = GetAcceleration(spline.GetWeights()[^1], 1f).normalized;
+        DrawBox(endPos, Quaternion.LookRotation(endVel, endAccel), (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor, duration);
+    }
+    public static void GizmosDrawSpline(CatmullSpline spline, Color splineColor, Color knotColor) {
+        var oldColor = Gizmos.color;
+        Gizmos.color = splineColor;
+        Vector3 lastPoint = spline.GetPositionFromT(0f);
+        for (int i = 0; i <= 64; i++) {
+            Vector3 newPoint = spline.GetPositionFromT((float)i / 64f);
+            Gizmos.DrawLine(lastPoint, newPoint);
+            lastPoint = newPoint;
+        }
+
+        var save = Gizmos.matrix;
+        foreach(var weight in spline.GetWeights()) {
+            Vector3 pointA = GetPosition(weight, 0f);
+            var startVel = GetVelocity(weight, 0f).normalized;
+            var startAccel = GetAcceleration(weight, 0f).normalized;
+            Gizmos.color = knotColor;
+            Gizmos.matrix = Matrix4x4.TRS(pointA, Quaternion.LookRotation(startVel, startAccel), Vector3.one - Vector3.forward * 0.8f);
+            Gizmos.DrawWireCube(Vector3.zero, Vector3.one*knotSize);
+        }
+        var endPos = GetPosition(spline.GetWeights()[^1], 1f);
+        var endVel = GetVelocity(spline.GetWeights()[^1], 1f).normalized;
+        var endAccel = GetAcceleration(spline.GetWeights()[^1], 1f).normalized;
+        Gizmos.matrix = Matrix4x4.TRS(endPos, Quaternion.LookRotation(endVel, endAccel), Vector3.one - Vector3.forward * 0.8f);
+        Gizmos.DrawWireCube(Vector3.zero, Vector3.one*knotSize);
+        
+        Gizmos.matrix = save;
+        Gizmos.color = oldColor;
     }
 }
