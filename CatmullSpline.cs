@@ -464,16 +464,22 @@ public class CatmullSpline {
             current = next;
         }
 
-        foreach (var weight in spline.GetWeights()) {
+        for(int i=0;i<spline.GetWeights().Count;i++) {
+            var weight = spline.GetWeights()[i];
             var startPos = GetPosition(weight, 0f);
             var startVel = GetVelocity(weight, 0f).normalized;
-            var startAccel = GetAcceleration(weight, 0f).normalized;
-            DrawBox(startPos, Quaternion.LookRotation(startVel, startAccel), (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor, duration);
+            float t = (float)i / (spline.GetWeights().Count - 1);
+            var startBinormal = spline.GetBinormalFromT(t);
+            if (startVel != startBinormal) {
+                DrawBox(startPos, Quaternion.LookRotation(startVel, startBinormal), (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor, duration);
+            }
         }
         var endPos = GetPosition(spline.GetWeights()[^1], 1f);
         var endVel = GetVelocity(spline.GetWeights()[^1], 1f).normalized;
-        var endAccel = GetAcceleration(spline.GetWeights()[^1], 1f).normalized;
-        DrawBox(endPos, Quaternion.LookRotation(endVel, endAccel), (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor, duration);
+        var endBinormal = spline.GetBinormalFromT(1f);
+        if (endVel != endBinormal) {
+            DrawBox(endPos, Quaternion.LookRotation(endVel, endBinormal), (Vector3.one - Vector3.forward * 0.8f) * knotSize, knotColor, duration);
+        }
     }
     public static void GizmosDrawSpline(CatmullSpline spline, Color splineColor, Color knotColor) {
         var oldColor = Gizmos.color;
@@ -486,20 +492,28 @@ public class CatmullSpline {
         }
 
         var save = Gizmos.matrix;
-        foreach(var weight in spline.GetWeights()) {
+        for(int i=0;i<spline.GetWeights().Count;i++) {
+            var weight = spline.GetWeights()[i];
+            float t = (float)i / (spline.GetWeights().Count - 1);
             Vector3 pointA = GetPosition(weight, 0f);
             var startVel = GetVelocity(weight, 0f).normalized;
-            var startAccel = GetAcceleration(weight, 0f).normalized;
-            Gizmos.color = knotColor;
-            Gizmos.matrix = Matrix4x4.TRS(pointA, Quaternion.LookRotation(startVel, startAccel), Vector3.one - Vector3.forward * 0.8f);
-            Gizmos.DrawWireCube(Vector3.zero, Vector3.one*knotSize);
+            var startBinormal = spline.GetBinormalFromT(t);
+            if (startVel != startBinormal) {
+                Gizmos.color = knotColor;
+                Gizmos.matrix = Matrix4x4.TRS(pointA, Quaternion.LookRotation(startVel, startBinormal),
+                    Vector3.one - Vector3.forward * 0.8f);
+                Gizmos.DrawWireCube(Vector3.zero, Vector3.one * knotSize);
+            }
         }
         var endPos = GetPosition(spline.GetWeights()[^1], 1f);
         var endVel = GetVelocity(spline.GetWeights()[^1], 1f).normalized;
-        var endAccel = GetAcceleration(spline.GetWeights()[^1], 1f).normalized;
-        Gizmos.matrix = Matrix4x4.TRS(endPos, Quaternion.LookRotation(endVel, endAccel), Vector3.one - Vector3.forward * 0.8f);
-        Gizmos.DrawWireCube(Vector3.zero, Vector3.one*knotSize);
-        
+        var endBinormal = spline.GetBinormalFromT(1);
+        if (endVel != endBinormal) {
+            Gizmos.matrix = Matrix4x4.TRS(endPos, Quaternion.LookRotation(endVel, endBinormal),
+                Vector3.one - Vector3.forward * 0.8f);
+            Gizmos.DrawWireCube(Vector3.zero, Vector3.one * knotSize);
+        }
+
         Gizmos.matrix = save;
         Gizmos.color = oldColor;
     }
