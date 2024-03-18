@@ -227,7 +227,7 @@ public class CatmullSpline {
             if (binormal == Vector3.zero) {
                 binormal = lastBinormal;
             } else {
-                float theta = Mathf.Acos(Vector3.Dot(lastTangent, tangent));
+                float theta = Mathf.Acos(Mathf.Clamp(Vector3.Dot(lastTangent, tangent),-1f,1f));
                 binormal = Quaternion.AngleAxis(theta*Mathf.Rad2Deg,binormal.normalized)*lastBinormal;
             }
             lastTangent = tangent;

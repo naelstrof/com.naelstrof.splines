@@ -1,7 +1,7 @@
 {
     "name": "com.naelstrof.splines",
     "displayName": "Naelstrof Splines",
-    "version": "2.0.2",
+    "version": "2.0.3",
     "unity": "2022.3",
     "description": "Spline math!"
 }
