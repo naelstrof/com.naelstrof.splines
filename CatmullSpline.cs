@@ -194,8 +194,9 @@ public class CatmullSpline {
     protected void GenerateDistanceLUT() {
         float dist = 0f;
         Vector3 lastPosition = GetPositionFromT(0f);
-        for(int i=0;i<DISTANCE_LUT_COUNT;i++) {
-            float t = (((float)i)/((float)DISTANCE_LUT_COUNT-1));
+        distanceLUT[0] = 0f;
+        for(int i=1;i<DISTANCE_LUT_COUNT;i++) {
+            float t = (float)i/(DISTANCE_LUT_COUNT-1);
             Vector3 position = GetPositionFromT(t);
             dist += Vector3.Distance(lastPosition, position);
             lastPosition = position;
@@ -205,8 +206,9 @@ public class CatmullSpline {
         arcLength = dist;
     }
     protected void GenerateBinormalLUT() {
-        // https://en.wikipedia.org/wiki/Frenet%E2%80%93Serret_formulas
         // https://janakiev.com/blog/framing-parametric-curves/
+        // https://legacy.cs.indiana.edu/ftp/techreports/TR425.pdf
+        // Using parallel transport frames
         Vector3 lastTangent = GetVelocityFromT(0).normalized;
         // Initial reference frame, uses Vector3.up
         Vector3 lastBinormal = Vector3.Cross(GetVelocityFromT(0),GetAccelerationFromT(0)).normalized;
@@ -216,15 +218,17 @@ public class CatmullSpline {
         if (lastBinormal == Vector3.zero) {
             lastBinormal = Vector3.Cross(GetVelocityFromT(0),-Vector3.forward).normalized;
         }
-        for(int i=0;i<BINORMAL_LUT_COUNT;i++) {
-            float t = (((float)i)/(float)BINORMAL_LUT_COUNT-1);
+
+        binormalLUT[0] = lastBinormal;
+        for(int i=1;i<BINORMAL_LUT_COUNT;i++) {
+            float t = (float)i/(BINORMAL_LUT_COUNT-1);
             Vector3 tangent = GetVelocityFromT(t).normalized;
             Vector3 binormal = Vector3.Cross(lastTangent, tangent);
-            if (binormal.magnitude == 0f) {
+            if (binormal == Vector3.zero) {
                 binormal = lastBinormal;
             } else {
-                float theta = Vector3.Angle(lastTangent, tangent); // equivalent to Mathf.Acos(Vector3.Dot(lastTangent,tangent))
-                binormal = Quaternion.AngleAxis(theta,binormal.normalized)*lastBinormal;
+                float theta = Mathf.Acos(Vector3.Dot(lastTangent, tangent));
+                binormal = Quaternion.AngleAxis(theta*Mathf.Rad2Deg,binormal.normalized)*lastBinormal;
             }
             lastTangent = tangent;
             lastBinormal = binormal;
