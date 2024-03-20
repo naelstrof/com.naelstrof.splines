@@ -211,10 +211,7 @@ public class CatmullSpline {
         // Using parallel transport frames
         Vector3 lastTangent = GetVelocityFromT(0).normalized;
         // Initial reference frame, uses Vector3.up
-        Vector3 lastBinormal = Vector3.Cross(GetVelocityFromT(0),GetAccelerationFromT(0)).normalized;
-        if (lastBinormal == Vector3.zero) {
-            lastBinormal = Vector3.Cross(GetVelocityFromT(0),Vector3.up).normalized;
-        }
+        Vector3 lastBinormal = Vector3.Cross(GetVelocityFromT(0),Vector3.up).normalized;
         if (lastBinormal == Vector3.zero) {
             lastBinormal = Vector3.Cross(GetVelocityFromT(0),-Vector3.forward).normalized;
         }
@@ -470,16 +467,14 @@ public class CatmullSpline {
             var startVel = GetVelocity(weight, 0f).normalized;
             float t = (float)i / (spline.GetWeights().Count - 1);
             var startBinormal = spline.GetBinormalFromT(t);
-            if (startVel != startBinormal) {
-                DrawBox(startPos, Quaternion.LookRotation(startVel, startBinormal), (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor, duration);
-            }
+            Quaternion rot = startVel != startBinormal && startVel != Vector3.zero ? Quaternion.LookRotation(startVel, startBinormal) : Quaternion.identity;
+            DrawBox(startPos, rot, (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor, duration);
         }
         var endPos = GetPosition(spline.GetWeights()[^1], 1f);
         var endVel = GetVelocity(spline.GetWeights()[^1], 1f).normalized;
         var endBinormal = spline.GetBinormalFromT(1f);
-        if (endVel != endBinormal) {
-            DrawBox(endPos, Quaternion.LookRotation(endVel, endBinormal), (Vector3.one - Vector3.forward * 0.8f) * knotSize, knotColor, duration);
-        }
+        Quaternion endRot = endVel != endBinormal && endVel != Vector3.zero ? Quaternion.LookRotation(endVel, endBinormal) : Quaternion.identity;
+        DrawBox(endPos, endRot, (Vector3.one - Vector3.forward * 0.8f) * knotSize, knotColor, duration);
     }
     public static void GizmosDrawSpline(CatmullSpline spline, Color splineColor, Color knotColor) {
         var oldColor = Gizmos.color;
@@ -498,21 +493,17 @@ public class CatmullSpline {
             Vector3 pointA = GetPosition(weight, 0f);
             var startVel = GetVelocity(weight, 0f).normalized;
             var startBinormal = spline.GetBinormalFromT(t);
-            if (startVel != startBinormal) {
-                Gizmos.color = knotColor;
-                Gizmos.matrix = Matrix4x4.TRS(pointA, Quaternion.LookRotation(startVel, startBinormal),
-                    Vector3.one - Vector3.forward * 0.8f);
-                Gizmos.DrawWireCube(Vector3.zero, Vector3.one * knotSize);
-            }
+            Quaternion rot = startVel != startBinormal && startVel != Vector3.zero ? Quaternion.LookRotation(startVel, startBinormal) : Quaternion.identity;
+            Gizmos.color = knotColor;
+            Gizmos.matrix = Matrix4x4.TRS(pointA, rot, Vector3.one - Vector3.forward * 0.8f);
+            Gizmos.DrawWireCube(Vector3.zero, Vector3.one * knotSize);
         }
         var endPos = GetPosition(spline.GetWeights()[^1], 1f);
         var endVel = GetVelocity(spline.GetWeights()[^1], 1f).normalized;
         var endBinormal = spline.GetBinormalFromT(1);
-        if (endVel != endBinormal) {
-            Gizmos.matrix = Matrix4x4.TRS(endPos, Quaternion.LookRotation(endVel, endBinormal),
-                Vector3.one - Vector3.forward * 0.8f);
-            Gizmos.DrawWireCube(Vector3.zero, Vector3.one * knotSize);
-        }
+        Quaternion endRot = endVel != endBinormal && endVel != Vector3.zero ? Quaternion.LookRotation(endVel, endBinormal) : Quaternion.identity;
+        Gizmos.matrix = Matrix4x4.TRS(endPos, endRot, Vector3.one - Vector3.forward * 0.8f);
+        Gizmos.DrawWireCube(Vector3.zero, Vector3.one * knotSize);
 
         Gizmos.matrix = save;
         Gizmos.color = oldColor;
