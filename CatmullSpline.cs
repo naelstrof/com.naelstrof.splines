@@ -194,8 +194,9 @@ public class CatmullSpline {
     protected void GenerateDistanceLUT() {
         float dist = 0f;
         Vector3 lastPosition = GetPositionFromT(0f);
-        for(int i=0;i<DISTANCE_LUT_COUNT;i++) {
-            float t = (((float)i)/((float)DISTANCE_LUT_COUNT-1));
+        distanceLUT[0] = 0f;
+        for(int i=1;i<DISTANCE_LUT_COUNT;i++) {
+            float t = (float)i/(DISTANCE_LUT_COUNT-1);
             Vector3 position = GetPositionFromT(t);
             dist += Vector3.Distance(lastPosition, position);
             lastPosition = position;
@@ -205,26 +206,26 @@ public class CatmullSpline {
         arcLength = dist;
     }
     protected void GenerateBinormalLUT() {
-        // https://en.wikipedia.org/wiki/Frenet%E2%80%93Serret_formulas
         // https://janakiev.com/blog/framing-parametric-curves/
+        // https://legacy.cs.indiana.edu/ftp/techreports/TR425.pdf
+        // Using parallel transport frames
         Vector3 lastTangent = GetVelocityFromT(0).normalized;
         // Initial reference frame, uses Vector3.up
-        Vector3 lastBinormal = Vector3.Cross(GetVelocityFromT(0),GetAccelerationFromT(0)).normalized;
-        if (lastBinormal == Vector3.zero) {
-            lastBinormal = Vector3.Cross(GetVelocityFromT(0),Vector3.up).normalized;
-        }
+        Vector3 lastBinormal = Vector3.Cross(GetVelocityFromT(0),Vector3.up).normalized;
         if (lastBinormal == Vector3.zero) {
             lastBinormal = Vector3.Cross(GetVelocityFromT(0),-Vector3.forward).normalized;
         }
-        for(int i=0;i<BINORMAL_LUT_COUNT;i++) {
-            float t = (((float)i)/(float)BINORMAL_LUT_COUNT);
+
+        binormalLUT[0] = lastBinormal;
+        for(int i=1;i<BINORMAL_LUT_COUNT;i++) {
+            float t = (float)i/(BINORMAL_LUT_COUNT-1);
             Vector3 tangent = GetVelocityFromT(t).normalized;
             Vector3 binormal = Vector3.Cross(lastTangent, tangent);
-            if (binormal.magnitude == 0f) {
+            if (binormal == Vector3.zero) {
                 binormal = lastBinormal;
             } else {
-                float theta = Vector3.Angle(lastTangent, tangent); // equivalent to Mathf.Acos(Vector3.Dot(lastTangent,tangent))
-                binormal = Quaternion.AngleAxis(theta,binormal.normalized)*lastBinormal;
+                float theta = Mathf.Acos(Mathf.Clamp(Vector3.Dot(lastTangent, tangent),-1f,1f));
+                binormal = Quaternion.AngleAxis(theta*Mathf.Rad2Deg,binormal.normalized)*lastBinormal;
             }
             lastTangent = tangent;
             lastBinormal = binormal;
@@ -232,12 +233,12 @@ public class CatmullSpline {
         }
 
         // Undo any twist.
-        //float overallAngle = Vector3.Angle(binormalLUT[0], binormalLUT[BINORMAL_LUT_COUNT-1]);
-        //for(int i=0;i<BINORMAL_LUT_COUNT;i++) {
-            //float t = (float)i/(float)BINORMAL_LUT_COUNT;
+        //float overallAngle = Vector3.Angle(binormalLUT[0], binormalLUT[resolution-1]);
+        //for(int i=0;i<resolution;i++) {
+            //float t = (float)i/(float)resolution;
             //binormalLUT[i] = Quaternion.AngleAxis(-overallAngle*t, GetVelocityFromT(t).normalized)*binormalLUT[i];
         //}
-        //binormalLUTGenerated = true;
+        binormalLUTGenerated = true;
     }
     protected CatmullSpline SetWeights(IList<Matrix4x4> newWeights) {
         weights.Clear();
@@ -391,9 +392,8 @@ public class CatmullSpline {
     public Matrix4x4 GetReferenceFrameFromT(float t) {
         Vector3 tangent = GetVelocityFromT(t).normalized;
         Vector3 binormal = GetBinormalFromT(t).normalized;
-        Vector3 normal = Vector3.Cross(tangent, binormal).normalized;
+        Vector3 normal = Vector3.Cross(tangent, binormal);
 
-        Vector3.OrthoNormalize(ref tangent, ref binormal, ref normal);
         // Change of basis https://math.stackexchange.com/questions/3540973/change-of-coordinates-and-change-of-basis-matrices
         // It also shows up here: https://docs.unity3d.com/ScriptReference/Vector3.OrthoNormalize.html
         Matrix4x4 bezierBasis = new Matrix4x4();
@@ -402,7 +402,7 @@ public class CatmullSpline {
         bezierBasis.SetRow(2,tangent); // Z Axis
         bezierBasis[3,3] = 1f;
         // Change of basis formula is B = P⁻¹ * A * P, where P is the basis transform.
-        return bezierBasis.transpose;
+        return bezierBasis.inverse;
     }
     
     private const float knotSize = 0.025f;
@@ -461,16 +461,20 @@ public class CatmullSpline {
             current = next;
         }
 
-        foreach (var weight in spline.GetWeights()) {
+        for(int i=0;i<spline.GetWeights().Count;i++) {
+            var weight = spline.GetWeights()[i];
             var startPos = GetPosition(weight, 0f);
             var startVel = GetVelocity(weight, 0f).normalized;
-            var startAccel = GetAcceleration(weight, 0f).normalized;
-            DrawBox(startPos, Quaternion.LookRotation(startVel, startAccel), (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor, duration);
+            float t = (float)i / (spline.GetWeights().Count - 1);
+            var startBinormal = spline.GetBinormalFromT(t);
+            Quaternion rot = startVel != startBinormal && startVel != Vector3.zero ? Quaternion.LookRotation(startVel, startBinormal) : Quaternion.identity;
+            DrawBox(startPos, rot, (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor, duration);
         }
         var endPos = GetPosition(spline.GetWeights()[^1], 1f);
         var endVel = GetVelocity(spline.GetWeights()[^1], 1f).normalized;
-        var endAccel = GetAcceleration(spline.GetWeights()[^1], 1f).normalized;
-        DrawBox(endPos, Quaternion.LookRotation(endVel, endAccel), (Vector3.one - Vector3.forward * 0.8f)*knotSize, knotColor, duration);
+        var endBinormal = spline.GetBinormalFromT(1f);
+        Quaternion endRot = endVel != endBinormal && endVel != Vector3.zero ? Quaternion.LookRotation(endVel, endBinormal) : Quaternion.identity;
+        DrawBox(endPos, endRot, (Vector3.one - Vector3.forward * 0.8f) * knotSize, knotColor, duration);
     }
     public static void GizmosDrawSpline(CatmullSpline spline, Color splineColor, Color knotColor) {
         var oldColor = Gizmos.color;
@@ -483,20 +487,24 @@ public class CatmullSpline {
         }
 
         var save = Gizmos.matrix;
-        foreach(var weight in spline.GetWeights()) {
+        for(int i=0;i<spline.GetWeights().Count;i++) {
+            var weight = spline.GetWeights()[i];
+            float t = (float)i / (spline.GetWeights().Count - 1);
             Vector3 pointA = GetPosition(weight, 0f);
             var startVel = GetVelocity(weight, 0f).normalized;
-            var startAccel = GetAcceleration(weight, 0f).normalized;
+            var startBinormal = spline.GetBinormalFromT(t);
+            Quaternion rot = startVel != startBinormal && startVel != Vector3.zero ? Quaternion.LookRotation(startVel, startBinormal) : Quaternion.identity;
             Gizmos.color = knotColor;
-            Gizmos.matrix = Matrix4x4.TRS(pointA, Quaternion.LookRotation(startVel, startAccel), Vector3.one - Vector3.forward * 0.8f);
-            Gizmos.DrawWireCube(Vector3.zero, Vector3.one*knotSize);
+            Gizmos.matrix = Matrix4x4.TRS(pointA, rot, Vector3.one - Vector3.forward * 0.8f);
+            Gizmos.DrawWireCube(Vector3.zero, Vector3.one * knotSize);
         }
         var endPos = GetPosition(spline.GetWeights()[^1], 1f);
         var endVel = GetVelocity(spline.GetWeights()[^1], 1f).normalized;
-        var endAccel = GetAcceleration(spline.GetWeights()[^1], 1f).normalized;
-        Gizmos.matrix = Matrix4x4.TRS(endPos, Quaternion.LookRotation(endVel, endAccel), Vector3.one - Vector3.forward * 0.8f);
-        Gizmos.DrawWireCube(Vector3.zero, Vector3.one*knotSize);
-        
+        var endBinormal = spline.GetBinormalFromT(1);
+        Quaternion endRot = endVel != endBinormal && endVel != Vector3.zero ? Quaternion.LookRotation(endVel, endBinormal) : Quaternion.identity;
+        Gizmos.matrix = Matrix4x4.TRS(endPos, endRot, Vector3.one - Vector3.forward * 0.8f);
+        Gizmos.DrawWireCube(Vector3.zero, Vector3.one * knotSize);
+
         Gizmos.matrix = save;
         Gizmos.color = oldColor;
     }
