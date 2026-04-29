@@ -218,7 +218,7 @@ public class CatmullSpline {
 
         binormalLUT[0] = lastBinormal;
         for(int i=1;i<BINORMAL_LUT_COUNT;i++) {
-            float t = (float)i/(BINORMAL_LUT_COUNT-1);
+            float t = (float)i/(BINORMAL_LUT_COUNT);
             Vector3 tangent = GetVelocityFromT(t).normalized;
             Vector3 binormal = Vector3.Cross(lastTangent, tangent);
             if (binormal == Vector3.zero) {
@@ -393,6 +393,7 @@ public class CatmullSpline {
         Vector3 tangent = GetVelocityFromT(t).normalized;
         Vector3 binormal = GetBinormalFromT(t).normalized;
         Vector3 normal = Vector3.Cross(tangent, binormal);
+        Vector3.OrthoNormalize(ref tangent, ref binormal, ref normal);
 
         // Change of basis https://math.stackexchange.com/questions/3540973/change-of-coordinates-and-change-of-basis-matrices
         // It also shows up here: https://docs.unity3d.com/ScriptReference/Vector3.OrthoNormalize.html
