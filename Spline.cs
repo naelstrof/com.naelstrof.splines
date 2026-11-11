@@ -41,7 +41,7 @@ public class Spline {
     }
 
     public Spline() {
-        SetFromCatmull(new[] { Vector3.zero, Vector3.one * 0.25f, Vector3.one * 0.75f, Vector3.one }, false);
+        SetFromCatmullPositionsLooped(new[] { Vector3.zero, Vector3.one * 0.25f, Vector3.one * 0.75f, Vector3.one });
     }
 
     private Spline(IList<Matrix4x4> weights) {
@@ -265,36 +265,46 @@ public class Spline {
     private static float Remap(float value, float from1, float to1, float from2, float to2) {
         return (value - from1) / (to1 - from1) * (to2 - from2) + from2;
     }
+
+    private static Matrix4x4 CreateWeightMatrix(Matrix4x4 characteristicMatrix, Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3) {
+        var pointMatrix = new Matrix4x4(p0, p1, p2, p3);
+        return pointMatrix * characteristicMatrix;
+    }
     
-    private static void GetWeightsLooped(Matrix4x4 characteristicMatrix, ICollection<Matrix4x4> weightCollection, IList<Vector3> newPoints) {
+    private static void GetWeightsWithEndHandles(Matrix4x4 characteristicMatrix, ICollection<Matrix4x4> weightCollection, IList<Vector3> newPoints, Vector3 startHandle, Vector3 endHandle) {
         var pointCount = newPoints.Count;
-        for (int i = 0; i < pointCount; i++) {
-            Vector3 p0 = newPoints[(i+pointCount-1)%pointCount];
-            Vector3 p1 = newPoints[i];
-            Vector3 p2 = newPoints[(i + 1)%pointCount];
-            Vector3 p3 = newPoints[(i + 2)%pointCount];
-            var pointMatrix = new Matrix4x4(p0, p1, p2, p3);
-            weightCollection.Add(pointMatrix * characteristicMatrix);
+        if (pointCount < 2) {
+            throw new UnityException("Spline must have at least 2 knots.");
+        }
+        for (int i = 0; i < pointCount-1; i++) {
+            var previousPoint = i == 0 ? startHandle : newPoints[i - 1];
+            var nextPoint = i == pointCount - 2 ? endHandle : newPoints[i + 2];
+            var weightMatrix = CreateWeightMatrix(
+                characteristicMatrix, 
+                previousPoint, 
+                newPoints[i], 
+                newPoints[i + 1], 
+                nextPoint
+            );
+            weightCollection.Add(weightMatrix);
         }
     }
 
-    private static void GetWeightsBezierKnots(Matrix4x4 basisMatrix, ICollection<Matrix4x4> weightCollection, IList<BezierKnot> knots) {
-        var knotCount = knots.Count;
-        if (knotCount < 2) {
-            throw new UnityException("Spline must have at least 2 knots.");
-        }
-        for (int i=0;i<knotCount-1;i++) {
-            var knot = knots[i];
-            var nextKnot = knots[i+1];
-            var p0 = knot.position;
-            var p1 = knot.frontHandle;
-            var p2 = nextKnot.backHandle;
-            var p3 = nextKnot.position;
-            var pointMatrix = new Matrix4x4(p0, p1, p2, p3);
-            weightCollection.Add(pointMatrix * basisMatrix);
+    private static void GetWeightsLooped(Matrix4x4 characteristicMatrix, ICollection<Matrix4x4> weightCollection, IList<Vector3> newPoints) {
+        var pointCount = newPoints.Count;
+        for (int i = 0; i < pointCount; i++) {
+            var weightMatrix = CreateWeightMatrix(
+                characteristicMatrix,
+                newPoints[(i+pointCount-1)%pointCount],
+                newPoints[i],
+                newPoints[(i + 1)%pointCount],
+                newPoints[(i + 2)%pointCount]
+            );
+            weightCollection.Add(weightMatrix);
         }
     }
-    private static void GetWeightsHermiteKnots(Matrix4x4 basisMatrix, ICollection<Matrix4x4> weightCollection, IList<HermiteKnot> knots) {
+
+    private static void GetWeightsBezierKnots(Matrix4x4 characteristicMatrix, ICollection<Matrix4x4> weightCollection, IList<BezierKnot> knots) {
         var knotCount = knots.Count;
         if (knotCount < 2) {
             throw new UnityException("Spline must have at least 2 knots.");
@@ -302,12 +312,32 @@ public class Spline {
         for (int i=0;i<knotCount-1;i++) {
             var knot = knots[i];
             var nextKnot = knots[i+1];
-            var p0 = knot.position;
-            var p1 = knot.velocity;
-            var p2 = nextKnot.velocity;
-            var p3 = nextKnot.position;
-            var pointMatrix = new Matrix4x4(p0, p1, p2, p3);
-            weightCollection.Add(pointMatrix * basisMatrix);
+            var weightMatrix = CreateWeightMatrix(
+                characteristicMatrix,
+                knot.position,
+                knot.frontHandle,
+                nextKnot.backHandle,
+                nextKnot.position
+            );
+            weightCollection.Add(weightMatrix);
+        }
+    }
+    private static void GetWeightsHermiteKnots(Matrix4x4 characteristicMatrix, ICollection<Matrix4x4> weightCollection, IList<HermiteKnot> knots) {
+        var knotCount = knots.Count;
+        if (knotCount < 2) {
+            throw new UnityException("Spline must have at least 2 knots.");
+        }
+        for (int i=0;i<knotCount-1;i++) {
+            var knot = knots[i];
+            var nextKnot = knots[i+1];
+            var weightMatrix = CreateWeightMatrix(
+                characteristicMatrix,
+                knot.position,
+                knot.velocity,
+                nextKnot.velocity,
+                nextKnot.position
+            );
+            weightCollection.Add(weightMatrix);
         }
     }
 
@@ -331,7 +361,7 @@ public class Spline {
     /// </summary>
     /// <param name="knots">The spline knots defining the curve.</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromSplineKnotsBezier(IList<BezierKnot> knots) {
+    public Spline SetFromBezierKnots(IList<BezierKnot> knots) {
         weights.Clear();
         GetWeightsBezierKnots(new Matrix4x4(
             new Vector4(1f, 0f, 0f, 0f),
@@ -352,7 +382,7 @@ public class Spline {
     /// </summary>
     /// <param name="knots">Start Position, Start Velocity, End Velocity, End Position</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromSplineKnotsHermite(IList<HermiteKnot> knots) {
+    public Spline SetFromHermiteKnots(IList<HermiteKnot> knots) {
         weights.Clear();
         GetWeightsHermiteKnots(new Matrix4x4(
             new Vector4(1f, 0f, 0f, 0f),
@@ -370,10 +400,8 @@ public class Spline {
     /// A proper C2 continuous spline, positions are never touched, but damn is the curve smooth...
     /// </summary>
     /// <param name="positions">the anchor positions</param>
-    /// <param name="loop">whether the spline should loop</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromBSpline(IList<Vector3> positions, bool loop) {
-        Assert.IsFalse(!loop && positions.Count < 4, "Non-Looping BSpline must have at least 4 points.");
+    public Spline SetFromBSplinePositionsLooped(IList<Vector3> positions) {
         weights.Clear();
         GetWeightsLooped(new Matrix4x4(
             new Vector4(1f, 4f, 1f, 0f) * 1f/6f,
@@ -381,11 +409,27 @@ public class Spline {
             new Vector4(3f, -6f, 3f, 0f) * 1f/6f,
             new Vector4(-1f, 3f, -3f, 1f) * 1f/6f
         ), weights, positions);
-        if (!loop) {
-            weights.RemoveAt(0);
-            weights.RemoveAt(weights.Count - 1);
-            weights.RemoveAt(weights.Count - 1);
-        }
+        distanceLUTGenerated = false;
+        binormalLUTGenerated = false;
+        bounds.Clear();
+        return this;
+    }
+    
+    /// <summary>
+    /// A proper C2 continuous spline, positions are never touched, but damn is the curve smooth...
+    /// </summary>
+    /// <param name="positions">the anchor positions</param>
+    /// <param name="startHandle">handle for start position</param>
+    /// <param name="endHandle">handle for end position</param>
+    /// <returns>The generated Spline</returns>
+    public Spline SetFromBSplinePositions(IList<Vector3> positions, Vector3 startHandle, Vector3 endHandle) {
+        weights.Clear();
+        GetWeightsWithEndHandles(new Matrix4x4(
+            new Vector4(1f, 4f, 1f, 0f) * 1f/6f,
+            new Vector4(-3f, 0f, 3f, 0f) * 1f/6f,
+            new Vector4(3f, -6f, 3f, 0f) * 1f/6f,
+            new Vector4(-1f, 3f, -3f, 1f) * 1f/6f
+        ), weights, positions, startHandle, endHandle);
         distanceLUTGenerated = false;
         binormalLUTGenerated = false;
         bounds.Clear();
@@ -396,11 +440,9 @@ public class Spline {
     /// A Catmull rom spline, but with the ability to set the tension. Tension of 0 is standard Catmull-Rom, tension of 1 is linear interpolation.
     /// </summary>
     /// <param name="positions">the anchor positions</param>
-    /// <param name="loop">whether the spline should loop</param>
     /// <param name="tension">the tension of the spline</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromCardinal(IList<Vector3> positions, bool loop, float tension) {
-        Assert.IsFalse(!loop && positions.Count < 4, "Non-Looping Cardinal must have at least 4 points.");
+    public Spline SetFromCardinalPositionsLooped(IList<Vector3> positions, float tension) {
         weights.Clear();
         float s = (1f - tension) / 2f;
         GetWeightsLooped(new Matrix4x4(
@@ -409,11 +451,29 @@ public class Spline {
             new Vector4(2f*s, s-3f, 3f-2f*s, -s),
             new Vector4(-s, 2f-s, s-2f, s)
         ), weights, positions);
-        if (!loop) {
-            weights.RemoveAt(0);
-            weights.RemoveAt(weights.Count - 1);
-            weights.RemoveAt(weights.Count - 1);
-        }
+        distanceLUTGenerated = false;
+        binormalLUTGenerated = false;
+        bounds.Clear();
+        return this;
+    }
+    
+    /// <summary>
+    /// A Catmull rom spline, but with the ability to set the tension. Tension of 0 is standard Catmull-Rom, tension of 1 is linear interpolation.
+    /// </summary>
+    /// <param name="positions">the anchor positions</param>
+    /// <param name="startHandle">handle for start position</param>
+    /// <param name="endHandle">handle for end position</param>
+    /// <param name="tension">the tension of the spline</param>
+    /// <returns>The generated Spline</returns>
+    public Spline SetFromCardinalPositions(IList<Vector3> positions, Vector3 startHandle, Vector3 endHandle, float tension) {
+        weights.Clear();
+        float s = (1f - tension) / 2f;
+        GetWeightsWithEndHandles(new Matrix4x4(
+            new Vector4(0f, 1f, 0f, 0f),
+            new Vector4(-s, 0f, s, 0f),
+            new Vector4(2f*s, s-3f, 3f-2f*s, -s),
+            new Vector4(-s, 2f-s, s-2f, s)
+        ), weights, positions, startHandle, endHandle);
         distanceLUTGenerated = false;
         binormalLUTGenerated = false;
         bounds.Clear();
@@ -424,10 +484,8 @@ public class Spline {
     /// A proper C1 continuous spline, positions are always touched, velocity is smooth.
     /// </summary>
     /// <param name="positions">the anchor positions</param>
-    /// <param name="loop">whether the spline should loop</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromCatmull(IList<Vector3> positions, bool loop) {
-        Assert.IsFalse(!loop && positions.Count < 4, $"Non-Looping Catmull must have at least 4 points. Got {positions.Count}");
+    public Spline SetFromCatmullPositionsLooped(IList<Vector3> positions) {
         weights.Clear();
         GetWeightsLooped(new Matrix4x4(
             new Vector4(0f, 2f, 0f, 0f)*0.5f,
@@ -435,11 +493,27 @@ public class Spline {
             new Vector4(2f, -5f, 4f, -1f)*0.5f,
             new Vector4(-1f, 3f, -3f, 1f)*0.5f
         ), weights, positions);
-        if (!loop) {
-            weights.RemoveAt(0);
-            weights.RemoveAt(weights.Count - 1);
-            weights.RemoveAt(weights.Count - 1);
-        }
+        distanceLUTGenerated = false;
+        binormalLUTGenerated = false;
+        bounds.Clear();
+        return this;
+    }
+
+    /// <summary>
+    /// A proper C1 continuous spline, positions are always touched, velocity is smooth.
+    /// </summary>
+    /// <param name="positions">the anchor positions</param>
+    /// <param name="startHandle">handle for start position</param>
+    /// <param name="endHandle">handle for end position</param>
+    /// <returns>The generated Spline</returns>
+    public Spline SetFromCatmullPositions(IList<Vector3> positions, Vector3 startHandle, Vector3 endHandle) {
+        weights.Clear();
+        GetWeightsWithEndHandles(new Matrix4x4(
+            new Vector4(0f, 2f, 0f, 0f)*0.5f,
+            new Vector4(-1f, 0f, 1f, 0f)*0.5f,
+            new Vector4(2f, -5f, 4f, -1f)*0.5f,
+            new Vector4(-1f, 3f, -3f, 1f)*0.5f
+        ), weights, positions, startHandle, endHandle);
         distanceLUTGenerated = false;
         binormalLUTGenerated = false;
         bounds.Clear();
