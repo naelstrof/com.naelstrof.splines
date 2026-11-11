@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Assertions;
 
 namespace GatorDragonGames {
 
@@ -8,10 +9,15 @@ public class Spline {
     public const int BINORMAL_LUT_COUNT = 32;
     public const int DISTANCE_LUT_COUNT = 32;
     
-    public struct SplineKnot {
+    public struct BezierKnot {
         public Vector3 backHandle;
         public Vector3 position;
         public Vector3 frontHandle;
+    }
+    
+    public struct HermiteKnot {
+        public Vector3 position;
+        public Vector3 velocity;
     }
 
     private bool distanceLUTGenerated = false;
@@ -35,7 +41,7 @@ public class Spline {
     }
 
     public Spline() {
-        SetFromCatmull(new[] { Vector3.zero, Vector3.one }, false);
+        SetFromCatmull(new[] { Vector3.zero, Vector3.one * 0.25f, Vector3.one * 0.75f, Vector3.one }, false);
     }
 
     private Spline(IList<Matrix4x4> weights) {
@@ -272,7 +278,7 @@ public class Spline {
         }
     }
 
-    private static void GetWeightsKnots(Matrix4x4 basisMatrix, ICollection<Matrix4x4> weightCollection, IList<SplineKnot> knots) {
+    private static void GetWeightsBezierKnots(Matrix4x4 basisMatrix, ICollection<Matrix4x4> weightCollection, IList<BezierKnot> knots) {
         var knotCount = knots.Count;
         if (knotCount < 2) {
             throw new UnityException("Spline must have at least 2 knots.");
@@ -283,6 +289,22 @@ public class Spline {
             var p0 = knot.position;
             var p1 = knot.frontHandle;
             var p2 = nextKnot.backHandle;
+            var p3 = nextKnot.position;
+            var pointMatrix = new Matrix4x4(p0, p1, p2, p3);
+            weightCollection.Add(pointMatrix * basisMatrix);
+        }
+    }
+    private static void GetWeightsHermiteKnots(Matrix4x4 basisMatrix, ICollection<Matrix4x4> weightCollection, IList<HermiteKnot> knots) {
+        var knotCount = knots.Count;
+        if (knotCount < 2) {
+            throw new UnityException("Spline must have at least 2 knots.");
+        }
+        for (int i=0;i<knotCount-1;i++) {
+            var knot = knots[i];
+            var nextKnot = knots[i+1];
+            var p0 = knot.position;
+            var p1 = knot.velocity;
+            var p2 = nextKnot.velocity;
             var p3 = nextKnot.position;
             var pointMatrix = new Matrix4x4(p0, p1, p2, p3);
             weightCollection.Add(pointMatrix * basisMatrix);
@@ -309,9 +331,9 @@ public class Spline {
     /// </summary>
     /// <param name="knots">The spline knots defining the curve.</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromSplineKnotsBezier(IList<SplineKnot> knots) {
+    public Spline SetFromSplineKnotsBezier(IList<BezierKnot> knots) {
         weights.Clear();
-        GetWeightsKnots(new Matrix4x4(
+        GetWeightsBezierKnots(new Matrix4x4(
             new Vector4(1f, 0f, 0f, 0f),
             new Vector4(-3f, 3f, 0f, 0f),
             new Vector4(3f, -6f, 3f, 0f),
@@ -330,9 +352,9 @@ public class Spline {
     /// </summary>
     /// <param name="knots">Start Position, Start Velocity, End Velocity, End Position</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromSplineKnotsHermite(IList<SplineKnot> knots) {
+    public Spline SetFromSplineKnotsHermite(IList<HermiteKnot> knots) {
         weights.Clear();
-        GetWeightsKnots(new Matrix4x4(
+        GetWeightsHermiteKnots(new Matrix4x4(
             new Vector4(1f, 0f, 0f, 0f),
             new Vector4(0f, 1f, 0f, 0f),
             new Vector4(-3f, -2f, -1f, 3f),
@@ -351,6 +373,7 @@ public class Spline {
     /// <param name="loop">whether the spline should loop</param>
     /// <returns>The generated Spline</returns>
     public Spline SetFromBSpline(IList<Vector3> positions, bool loop) {
+        Assert.IsFalse(!loop && positions.Count < 4, "Non-Looping BSpline must have at least 4 points.");
         weights.Clear();
         GetWeightsLooped(new Matrix4x4(
             new Vector4(1f, 4f, 1f, 0f) * 1f/6f,
@@ -359,6 +382,8 @@ public class Spline {
             new Vector4(-1f, 3f, -3f, 1f) * 1f/6f
         ), weights, positions);
         if (!loop) {
+            weights.RemoveAt(0);
+            weights.RemoveAt(weights.Count - 1);
             weights.RemoveAt(weights.Count - 1);
         }
         distanceLUTGenerated = false;
@@ -375,6 +400,7 @@ public class Spline {
     /// <param name="tension">the tension of the spline</param>
     /// <returns>The generated Spline</returns>
     public Spline SetFromCardinal(IList<Vector3> positions, bool loop, float tension) {
+        Assert.IsFalse(!loop && positions.Count < 4, "Non-Looping Cardinal must have at least 4 points.");
         weights.Clear();
         float s = (1f - tension) / 2f;
         GetWeightsLooped(new Matrix4x4(
@@ -384,6 +410,8 @@ public class Spline {
             new Vector4(-s, 2f-s, s-2f, s)
         ), weights, positions);
         if (!loop) {
+            weights.RemoveAt(0);
+            weights.RemoveAt(weights.Count - 1);
             weights.RemoveAt(weights.Count - 1);
         }
         distanceLUTGenerated = false;
@@ -399,6 +427,7 @@ public class Spline {
     /// <param name="loop">whether the spline should loop</param>
     /// <returns>The generated Spline</returns>
     public Spline SetFromCatmull(IList<Vector3> positions, bool loop) {
+        Assert.IsFalse(!loop && positions.Count < 4, $"Non-Looping Catmull must have at least 4 points. Got {positions.Count}");
         weights.Clear();
         GetWeightsLooped(new Matrix4x4(
             new Vector4(0f, 2f, 0f, 0f)*0.5f,
@@ -407,6 +436,8 @@ public class Spline {
             new Vector4(-1f, 3f, -3f, 1f)*0.5f
         ), weights, positions);
         if (!loop) {
+            weights.RemoveAt(0);
+            weights.RemoveAt(weights.Count - 1);
             weights.RemoveAt(weights.Count - 1);
         }
         distanceLUTGenerated = false;
