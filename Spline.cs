@@ -34,48 +34,8 @@ public class Spline {
         private set => _arcLength = value;
     }
 
-    private static Matrix4x4 GenerateCentripetalCatmullMatrixSlow(float a, float b, float c, float d) {
-        Vector4 p0Fact = new Vector4(b * c * c, -2f * b * c - c * c, b + 2f * c, -1f) *
-                         (1f / ((b - a) * (c - a) * (c - b)));
-        Vector4 p1Fact = new Vector4(-a * c * c, 2f * a * c + c * c, -a - 2f * c, 1f) *
-                         (1f / ((b - a) * (c - a) * (c - b)));
-        p1Fact += new Vector4(-a * c * c, 2f * a * c + c * c, -a - 2f * c, 1f) * (1f / ((c - b) * (c - a) * (c - b)));
-        p1Fact += new Vector4(-b * c * d, b * d + b * c + c * d, -d - c - b, 1f) * (1f / ((c - b) * (d - b) * (c - b)));
-        Vector4 p2Fact = new Vector4(a * b * c, -a * b - a * c - b * c, a + b + c, -1f) *
-                         (1f / ((c - b) * (c - a) * (c - b)));
-        p2Fact += new Vector4(d * b * b, -(b * b) - 2f * b * d, d + 2f * b, -1f) * (1f / ((c - b) * (d - b) * (c - b)));
-        p2Fact += new Vector4(d * b * b, -(b * b) - 2f * b * d, d + 2f * b, -1f) * (1f / ((d - c) * (d - b) * (c - b)));
-        Vector4 p3Fact = new Vector4(-c * b * b, b * b + 2f * b * c, -c - 2f * b, 1f) *
-                         (1f / ((d - c) * (d - b) * (c - b)));
-
-        Matrix4x4 rowMajor = new Matrix4x4();
-        rowMajor.SetRow(0, p0Fact);
-        rowMajor.SetRow(1, p1Fact);
-        rowMajor.SetRow(2, p2Fact);
-        rowMajor.SetRow(3, p3Fact);
-        return rowMajor;
-    }
-
-    private static Matrix4x4 GenerateCentripetalCatmullMatrixFast(float a, float d) {
-        Vector4 p0Fact = new Vector4(0f, -1f, 2f, -1f) * (1f / (-a * (1f - a)));
-        Vector4 p1Fact = new Vector4(-a, 2f * a + 1f, -a - 2f, 1f) * (1f / (-a * (1f - a)));
-        p1Fact += new Vector4(-a, 2f * a + 1f, -a - 2f, 1f) * (1f / (1f - a));
-        p1Fact += new Vector4(0f, d, -d - 1f, 1f) * (1f / d);
-        Vector4 p2Fact = new Vector4(0f, -a, a + 1f, -1f) * (1f / (1f - a));
-        p2Fact += new Vector4(0f, 0f, d, -1f) * (1f / d);
-        p2Fact += new Vector4(0f, 0f, d, -1f) * (1f / ((d - 1f) * d));
-        Vector4 p3Fact = new Vector4(0f, 0f, -1f, 1f) * (1f / ((d - 1f) * (d)));
-
-        Matrix4x4 rowMajor = new Matrix4x4();
-        rowMajor.SetRow(0, p0Fact);
-        rowMajor.SetRow(1, p1Fact);
-        rowMajor.SetRow(2, p2Fact);
-        rowMajor.SetRow(3, p3Fact);
-        return rowMajor;
-    }
-
     public Spline() {
-        SetFromCentripetalCatmull(new[] { Vector3.zero, Vector3.one }, 0.5f);
+        SetFromCatmull(new[] { Vector3.zero, Vector3.one }, false);
     }
 
     private Spline(IList<Matrix4x4> weights) {
@@ -299,39 +259,20 @@ public class Spline {
     private static float Remap(float value, float from1, float to1, float from2, float to2) {
         return (value - from1) / (to1 - from1) * (to2 - from2) + from2;
     }
-
-    private static float GetKnotInterval(Vector3 a, Vector3 b, float alpha) {
-        return Mathf.Pow(Vector3.SqrMagnitude(a - b), 0.5f * alpha);
-    }
     
-    private static void GetWeightsCatmullLooped(ICollection<Matrix4x4> weightCollection, IList<Vector3> newPoints, float alpha = 0.5f) {
-        // alpha 0 for standard Catmull-Rom
-        // alpha 0.5 for Centripetal Catmull-Rom, this is usually desired
-        // alpha 1 for Chordal Catmull-Rom
+    private static void GetWeightsLooped(Matrix4x4 characteristicMatrix, ICollection<Matrix4x4> weightCollection, IList<Vector3> newPoints) {
         var pointCount = newPoints.Count;
         for (int i = 0; i < pointCount; i++) {
-            var distance = 0f;
             Vector3 p0 = newPoints[(i+pointCount-1)%pointCount];
             Vector3 p1 = newPoints[i];
             Vector3 p2 = newPoints[(i + 1)%pointCount];
             Vector3 p3 = newPoints[(i + 2)%pointCount];
-            
-            distance += GetKnotInterval(p0, p1, alpha);
-            var interval1 = distance;
-
-            distance += GetKnotInterval(p1, p2, alpha);
-            var interval2 = distance;
-            
-            distance += GetKnotInterval(p2, p3, alpha);
-
             var pointMatrix = new Matrix4x4(p0, p1, p2, p3);
-            weightCollection.Add(pointMatrix * GenerateCentripetalCatmullMatrixFast(
-                Remap(0f, interval1 / distance, interval2 / distance, 0f, 1f),
-                Remap(1f, interval1 / distance, interval2 / distance, 0f, 1f)));
+            weightCollection.Add(pointMatrix * characteristicMatrix);
         }
     }
 
-    private static void GetWeightsMatrix(Matrix4x4 basisMatrix, ICollection<Matrix4x4> weightCollection, IList<SplineKnot> knots) {
+    private static void GetWeightsKnots(Matrix4x4 basisMatrix, ICollection<Matrix4x4> weightCollection, IList<SplineKnot> knots) {
         var knotCount = knots.Count;
         if (knotCount < 2) {
             throw new UnityException("Spline must have at least 2 knots.");
@@ -360,57 +301,117 @@ public class Spline {
         int count = end - start;
         return GetLengthFromSubsection(count, start, subT);
     }
-
-    public Spline SetFromCentripetalCatmull(IList<Vector3> newPoints, float alpha = 0.5f) {
-        weights.Clear();
-        GetWeightsCatmullLooped(weights, newPoints, alpha);
-        weights.RemoveAt(weights.Count - 1);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
-        return this;
-    }
     
-    public Spline SetFromCentripetalCatmullLooped(IList<Vector3> newPoints, float alpha = 0.5f) {
-        weights.Clear();
-        GetWeightsCatmullLooped(weights, newPoints, alpha);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
-        return this;
-    }
-    
-    public Spline SetFromCentripetalCatmullWithCustomHandles(IList<Vector3> newPoints, float alpha = 0.5f) {
-        if (newPoints.Count < 4) {
-            throw new UnityException("CentripetalCatmullWithCustomHandles must have at least 4 points.");
-        }
-        weights.Clear();
-        GetWeightsCatmullLooped(weights, newPoints, alpha);
-        weights.RemoveAt(0);
-        weights.RemoveAt(weights.Count - 1);
-        weights.RemoveAt(weights.Count - 1);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
-        return this;
-    }
-    
-    private Spline SetFromSplineKnots(Matrix4x4 basisMatrix, IList<SplineKnot> knots) {
-        weights.Clear();
-        GetWeightsMatrix(basisMatrix, weights, knots);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
-        return this;
-    }
-    
+    /// <summary>
+    /// Standard Bezier spline
+    /// Knot positions are touched no matter what, handles define the curve between them.
+    /// Improperly defined handles can cause corners and pinches.
+    /// </summary>
+    /// <param name="knots">The spline knots defining the curve.</param>
+    /// <returns>The generated Spline</returns>
     public Spline SetFromSplineKnotsBezier(IList<SplineKnot> knots) {
-        SetFromSplineKnots(new Matrix4x4(
+        weights.Clear();
+        GetWeightsKnots(new Matrix4x4(
             new Vector4(1f, 0f, 0f, 0f),
             new Vector4(-3f, 3f, 0f, 0f),
             new Vector4(3f, -6f, 3f, 0f),
             new Vector4(-1f, 3f, -3f, 1f)
-        ), knots);
+        ), weights, knots);
+        distanceLUTGenerated = false;
+        binormalLUTGenerated = false;
+        bounds.Clear();
+        return this;
+    }
+    
+    /// <summary>
+    /// Set the spline from a list of SplineKnots using Hermite interpolation.
+    /// The handles of each knot are velocity vectors from zero
+    /// The knots are world positions.
+    /// </summary>
+    /// <param name="knots">Start Position, Start Velocity, End Velocity, End Position</param>
+    /// <returns>The generated Spline</returns>
+    public Spline SetFromSplineKnotsHermite(IList<SplineKnot> knots) {
+        weights.Clear();
+        GetWeightsKnots(new Matrix4x4(
+            new Vector4(1f, 0f, 0f, 0f),
+            new Vector4(0f, 1f, 0f, 0f),
+            new Vector4(-3f, -2f, -1f, 3f),
+            new Vector4(2f, 1f, 1f, -2)
+        ), weights, knots);
+        distanceLUTGenerated = false;
+        binormalLUTGenerated = false;
+        bounds.Clear();
+        return this;
+    }
+    
+    /// <summary>
+    /// A proper C2 continuous spline, positions are never touched, but damn is the curve smooth...
+    /// </summary>
+    /// <param name="positions">the anchor positions</param>
+    /// <param name="loop">whether the spline should loop</param>
+    /// <returns>The generated Spline</returns>
+    public Spline SetFromBSpline(IList<Vector3> positions, bool loop) {
+        weights.Clear();
+        GetWeightsLooped(new Matrix4x4(
+            new Vector4(1f, 4f, 1f, 0f) * 1f/6f,
+            new Vector4(-3f, 0f, 3f, 0f) * 1f/6f,
+            new Vector4(3f, -6f, 3f, 0f) * 1f/6f,
+            new Vector4(-1f, 3f, -3f, 1f) * 1f/6f
+        ), weights, positions);
+        if (!loop) {
+            weights.RemoveAt(weights.Count - 1);
+        }
+        distanceLUTGenerated = false;
+        binormalLUTGenerated = false;
+        bounds.Clear();
+        return this;
+    }
+    
+    /// <summary>
+    /// A Catmull rom spline, but with the ability to set the tension. Tension of 0 is standard Catmull-Rom, tension of 1 is linear interpolation.
+    /// </summary>
+    /// <param name="positions">the anchor positions</param>
+    /// <param name="loop">whether the spline should loop</param>
+    /// <param name="tension">the tension of the spline</param>
+    /// <returns>The generated Spline</returns>
+    public Spline SetFromCardinal(IList<Vector3> positions, bool loop, float tension) {
+        weights.Clear();
+        float s = (1f - tension) / 2f;
+        GetWeightsLooped(new Matrix4x4(
+            new Vector4(0f, 1f, 0f, 0f),
+            new Vector4(-s, 0f, s, 0f),
+            new Vector4(2f*s, s-3f, 3f-2f*s, -s),
+            new Vector4(-s, 2f-s, s-2f, s)
+        ), weights, positions);
+        if (!loop) {
+            weights.RemoveAt(weights.Count - 1);
+        }
+        distanceLUTGenerated = false;
+        binormalLUTGenerated = false;
+        bounds.Clear();
+        return this;
+    }
+    
+    /// <summary>
+    /// A proper C1 continuous spline, positions are always touched, velocity is smooth.
+    /// </summary>
+    /// <param name="positions">the anchor positions</param>
+    /// <param name="loop">whether the spline should loop</param>
+    /// <returns>The generated Spline</returns>
+    public Spline SetFromCatmull(IList<Vector3> positions, bool loop) {
+        weights.Clear();
+        GetWeightsLooped(new Matrix4x4(
+            new Vector4(0f, 2f, 0f, 0f)*0.5f,
+            new Vector4(-1f, 0f, 1f, 0f)*0.5f,
+            new Vector4(2f, -5f, 4f, -1f)*0.5f,
+            new Vector4(-1f, 3f, -3f, 1f)*0.5f
+        ), weights, positions);
+        if (!loop) {
+            weights.RemoveAt(weights.Count - 1);
+        }
+        distanceLUTGenerated = false;
+        binormalLUTGenerated = false;
+        bounds.Clear();
         return this;
     }
 
