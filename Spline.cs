@@ -41,7 +41,14 @@ public class Spline {
     }
 
     public Spline() {
-        SetFromCatmullPositionsLooped(new[] { Vector3.zero, Vector3.one * 0.25f, Vector3.one * 0.75f, Vector3.one });
+        SetWeights(new List<Matrix4x4> {
+            new(
+                new Vector4(0f, 1f, 0f, 0f),
+                new Vector4(0f, 1f, 0f, 0f),
+                new Vector4(0f, 1f, 0f, 0f),
+                new Vector4(0f, 0f, 0f, 0f)
+            )
+        });
     }
 
     private Spline(IList<Matrix4x4> weights) {
@@ -401,7 +408,7 @@ public class Spline {
     /// </summary>
     /// <param name="positions">the anchor positions</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromBSplinePositionsLooped(IList<Vector3> positions) {
+    private Spline SetFromBSplinePositionsLooped(IList<Vector3> positions) {
         weights.Clear();
         GetWeightsLooped(new Matrix4x4(
             new Vector4(1f, 4f, 1f, 0f) * 1f/6f,
@@ -435,14 +442,30 @@ public class Spline {
         bounds.Clear();
         return this;
     }
-    
+
+    /// <summary>
+    /// A proper C2 continuous spline, positions are never touched, but damn is the curve smooth... With automatic start and end handles
+    /// </summary>
+    /// <param name="positions">the anchor positions</param>
+    /// <param name="startHandle">handle for start position</param>
+    /// <param name="endHandle">handle for end position</param>
+    /// <returns>The generated Spline</returns>
+    public Spline SetFromBSplinePositions(IList<Vector3> positions, bool looped = false) {
+        if (looped) {
+            return SetFromBSplinePositionsLooped(positions);
+        }
+        var startHandle = positions[0] + (positions[0] - positions[1]);
+        var endHandle = positions[^1] + (positions[^1] - positions[^2]);
+        return SetFromBSplinePositions(positions, startHandle, endHandle);
+    }
+
     /// <summary>
     /// A Catmull rom spline, but with the ability to set the tension. Tension of 0 is standard Catmull-Rom, tension of 1 is linear interpolation.
     /// </summary>
     /// <param name="positions">the anchor positions</param>
     /// <param name="tension">the tension of the spline</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromCardinalPositionsLooped(IList<Vector3> positions, float tension) {
+    private Spline SetFromCardinalPositionsLooped(IList<Vector3> positions, float tension) {
         weights.Clear();
         float s = (1f - tension) / 2f;
         GetWeightsLooped(new Matrix4x4(
@@ -481,11 +504,27 @@ public class Spline {
     }
     
     /// <summary>
+    /// A Catmull rom spline, but with the ability to set the tension. Tension of 0 is standard Catmull-Rom, tension of 1 is linear interpolation.
+    /// </summary>
+    /// <param name="positions">the anchor positions</param>
+    /// <param name="tension">the tension of the spline</param>
+    /// <param name="looped">whether the spline is looped</param>
+    /// <returns>The generated Spline</returns>
+    public Spline SetFromCardinalPositions(IList<Vector3> positions, float tension, bool looped = false) {
+        if (looped) {
+            return SetFromCardinalPositionsLooped(positions, tension);
+        }
+        var startHandle = positions[0] + (positions[0] - positions[1]);
+        var endHandle = positions[^1] + (positions[^1] - positions[^2]);
+        return SetFromCardinalPositions(positions, startHandle, endHandle, tension);
+    }
+    
+    /// <summary>
     /// A proper C1 continuous spline, positions are always touched, velocity is smooth.
     /// </summary>
     /// <param name="positions">the anchor positions</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromCatmullPositionsLooped(IList<Vector3> positions) {
+    private Spline SetFromCatmullPositionsLooped(IList<Vector3> positions) {
         weights.Clear();
         GetWeightsLooped(new Matrix4x4(
             new Vector4(0f, 2f, 0f, 0f)*0.5f,
@@ -518,6 +557,21 @@ public class Spline {
         binormalLUTGenerated = false;
         bounds.Clear();
         return this;
+    }
+
+    /// <summary>
+    /// A proper C1 continuous spline, positions are always touched, velocity is smooth. With automatic start and end handles
+    /// </summary>
+    /// <param name="positions">the anchor positions</param>
+    /// <param name="looped">whether the spline should be looped</param>
+    /// <returns>The generated Spline</returns>
+    public Spline SetFromCatmullPositions(IList<Vector3> positions, bool looped = false) {
+        if (looped) {
+            return SetFromCatmullPositionsLooped(positions);
+        }
+        var startHandle = positions[0] + (positions[0] - positions[1]);
+        var endHandle = positions[^1] + (positions[^1] - positions[^2]);
+        return SetFromCatmullPositions(positions, startHandle, endHandle);
     }
 
     public float GetClosestTimeFromPositionFast(Vector3 position, int samples = 32) {
@@ -767,6 +821,7 @@ public class Spline {
         Gizmos.matrix = save;
         Gizmos.color = oldColor;
     }
+    
 }
 
 }
