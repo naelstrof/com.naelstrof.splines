@@ -572,8 +572,25 @@ public class Spline {
     }
 
     public Vector3 GetPositionFromT(float t) {
-        var subT = GetCurveSegmentTimeFromCurveTime(out var curveSegmentIndex, t);
-        return SampleCurveSegmentPosition(curveSegmentIndex, subT);
+        switch (t) {
+            case < 0f: {
+                var arclength = arcLength;
+                var vel = SampleCurveSegmentVelocity(0, 0f);
+                var pos = SampleCurveSegmentPosition(0, 0f);
+                return pos + vel.normalized * (t * arclength);
+            }
+            case > 1f: {
+                var arclength = arcLength;
+                var endSegment = weights.Count - 1;
+                var vel = SampleCurveSegmentVelocity(endSegment, 1f);
+                var pos = SampleCurveSegmentPosition(endSegment, 1f);
+                return pos + vel.normalized * ((t-1f) * arclength);
+            }
+            default: {
+                var subT = GetCurveSegmentTimeFromCurveTime(out var curveSegmentIndex, t);
+                return SampleCurveSegmentPosition(curveSegmentIndex, subT);
+            }
+        }
     }
 
     public Vector3 GetVelocityFromDistance(float distance) {
@@ -587,13 +604,32 @@ public class Spline {
     }
 
     public Vector3 GetVelocityFromT(float t) {
-        var subT = GetCurveSegmentTimeFromCurveTime(out var curveSegmentIndex, t);
-        return SampleCurveSegmentVelocity(curveSegmentIndex, subT);
+        switch (t) {
+            case < 0f: {
+                var vel = SampleCurveSegmentVelocity(0, 0f);
+                return vel.normalized;
+            }
+            case > 1f: {
+                var vel = SampleCurveSegmentVelocity(weights.Count - 1, 1f);
+                return vel.normalized;
+            }
+            default: {
+                var subT = GetCurveSegmentTimeFromCurveTime(out var curveSegmentIndex, t);
+                return SampleCurveSegmentVelocity(curveSegmentIndex, subT);
+            }
+        }
     }
 
     public Vector3 GetAccelerationFromT(float t) {
-        var subT = GetCurveSegmentTimeFromCurveTime(out var curveSegmentIndex, t);
-        return SampleCurveSegmentAcceleration(curveSegmentIndex, subT);
+        switch (t) {
+            case < 0f:
+            case > 1f:
+                return Vector3.zero;
+            default: {
+                var subT = GetCurveSegmentTimeFromCurveTime(out var curveSegmentIndex, t);
+                return SampleCurveSegmentAcceleration(curveSegmentIndex, subT);
+            }
+        }
     }
 
     public Vector3 GetBinormalFromT(float t) {
@@ -607,7 +643,7 @@ public class Spline {
         return Vector3.Lerp(binormalLUT[index], binormalLUT[index + 1], lerpT);
     }
 
-    public Matrix4x4 GetReferenceFrameFromT(float t) {
+    public Matrix4x4 GetBasisFromT(float t) {
         Vector3 tangent = GetVelocityFromT(t).normalized;
         Vector3 binormal = GetBinormalFromT(t).normalized;
         Vector3 normal = Vector3.Cross(tangent, binormal);
@@ -622,6 +658,10 @@ public class Spline {
         bezierBasis[3, 3] = 1f;
         // Change of basis formula is B = P⁻¹ * A * P, where P is the basis transform.
         return bezierBasis.inverse;
+    }
+
+    public Matrix4x4 GetReferenceFrameFromT(float t) {
+        return Matrix4x4.Translate(GetPositionFromT(t)) * GetBasisFromT(t);
     }
 
     public void DebugDraw(Color splineColor, Color knotColor, float duration = 0f) {
