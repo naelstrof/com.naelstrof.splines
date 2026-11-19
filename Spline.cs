@@ -1,120 +1,62 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Assertions;
 
 namespace GatorDragonGames {
 
 public class Spline {
-    public const int BINORMAL_LUT_COUNT = 32;
-    public const int DISTANCE_LUT_COUNT = 32;
-    
     public struct BezierKnot {
-        public Vector3 backHandle;
-        public Vector3 position;
-        public Vector3 frontHandle;
+        public float backHandle;
+        public float position;
+        public float frontHandle;
     }
     
     public struct HermiteKnot {
-        public Vector3 position;
-        public Vector3 velocity;
+        public float position;
+        public float velocity;
     }
 
-    private bool distanceLUTGenerated = false;
-    private bool binormalLUTGenerated = false;
-    private List<Matrix4x4> weights = new();
-    private float[] distanceLUT = new float[DISTANCE_LUT_COUNT];
-    private Vector3[] binormalLUT = new Vector3[BINORMAL_LUT_COUNT];
-    private List<Bounds> bounds = new();
-
-    private float _arcLength;
-
-    public float arcLength {
-        get {
-            if (!distanceLUTGenerated) {
-                GenerateDistanceLUT();
-            }
-
-            return _arcLength;
-        }
-        private set => _arcLength = value;
-    }
+    private List<Vector4> weights = new();
 
     public Spline() {
-        SetWeights(new List<Matrix4x4> {
-            new(
-                new Vector4(0f, 1f, 0f, 0f),
-                new Vector4(0f, 1f, 0f, 0f),
-                new Vector4(0f, 1f, 0f, 0f),
-                new Vector4(0f, 0f, 0f, 0f)
-            )
-        });
+        SetFromCatmullPositions(new [] { 0f, 1f });
     }
 
-    private Spline(IList<Matrix4x4> weights) {
+    private Spline(IList<Vector4> weights) {
         SetWeights(weights);
     }
 
     private static Spline Lerp(Spline a, Spline b, float t) {
-        List<Matrix4x4> merged = new List<Matrix4x4>(a.weights);
+        List<Vector4> merged = new List<Vector4>(a.weights);
         for (int i = 0; i < merged.Count; i++) {
-            Vector4 column1 = Vector4.Lerp(merged[i].GetColumn(0), b.weights[i].GetColumn(0), t);
-            Vector4 column2 = Vector4.Lerp(merged[i].GetColumn(1), b.weights[i].GetColumn(1), t);
-            Vector4 column3 = Vector4.Lerp(merged[i].GetColumn(2), b.weights[i].GetColumn(2), t);
-            Vector4 column4 = Vector4.Lerp(merged[i].GetColumn(3), b.weights[i].GetColumn(3), t);
-            merged[i] = new Matrix4x4(column1, column2, column3, column4);
+            merged[i] = Vector4.Lerp(merged[i], b.weights[i], t);
         }
-
         return new Spline(merged);
     }
 
-    private static Vector3 GetPosition(Matrix4x4 weightBlock, float t) {
-        return weightBlock * new Vector4(1f, t, t * t, t * t * t);
+    private static float GetPosition(Vector4 weightBlock, float t) {
+        return Vector4.Dot(weightBlock, new Vector4(1f, t, t * t, t * t * t));
     }
 
-    private static Vector3 GetVelocity(Matrix4x4 weightBlock, float t) {
-        return weightBlock * new Vector4(0f, 1f, 2f * t, 3f * t * t);
+    private static float GetVelocity(Vector4 weightBlock, float t) {
+        return Vector4.Dot(weightBlock, new Vector4(0f, 1f, 2f * t, 3f * t * t));
     }
 
-    private static Vector3 GetAcceleration(Matrix4x4 weightBlock, float t) {
-        return weightBlock * new Vector4(0f, 0f, 2f, 6f * t);
+    private static float GetAcceleration(Vector4 weightBlock, float t) {
+        return Vector4.Dot(weightBlock, new Vector4(0f, 0f, 2f, 6f * t));
     }
 
-    public List<Matrix4x4> GetWeights() => weights;
+    public List<Vector4> GetWeights() => weights;
 
-    private float[] GetDistanceLUT() {
-        if (!distanceLUTGenerated) {
-            GenerateDistanceLUT();
-        }
-
-        return distanceLUT;
-    }
-
-    private Vector3[] GetBinormalLUT() {
-        if (!binormalLUTGenerated) {
-            GenerateBinormalLUT();
-        }
-
-        return binormalLUT;
-    }
-
-    public List<Bounds> GetBounds() {
-        if (bounds.Count != weights.Count) {
-            GenerateBounds();
-        }
-
-        return bounds;
-    }
-
-    private Vector3 SampleCurveSegmentPosition(int curveSegmentIndex, float t) {
+    private float SampleCurveSegmentPosition(int curveSegmentIndex, float t) {
         return GetPosition(weights[curveSegmentIndex], t);
     }
 
-    private Vector3 SampleCurveSegmentVelocity(int curveSegmentIndex, float t) {
+    private float SampleCurveSegmentVelocity(int curveSegmentIndex, float t) {
         return GetVelocity(weights[curveSegmentIndex], t);
     }
 
-    private Vector3 SampleCurveSegmentAcceleration(int curveSegmentIndex, float t) {
+    private float SampleCurveSegmentAcceleration(int curveSegmentIndex, float t) {
         return GetAcceleration(weights[curveSegmentIndex], t);
     }
 
@@ -124,148 +66,14 @@ public class Spline {
         return offseted * (float)(weights.Count);
     }
 
-    public float GetTimeFromDistance(float distance) {
-        if (!distanceLUTGenerated) {
-            GenerateDistanceLUT();
-        }
-
-        if (distance > 0f && distance < arcLength) {
-            for (int i = 0; i < DISTANCE_LUT_COUNT - 1; i++) {
-                if (distance > distanceLUT[i] && distance < distanceLUT[i + 1]) {
-                    return Remap(distance, distanceLUT[i], distanceLUT[i + 1],
-                        (float)i / (float)(DISTANCE_LUT_COUNT - 1), (float)(i + 1) / (float)(DISTANCE_LUT_COUNT - 1));
-                }
-            }
-        }
-
-        return distance / arcLength;
-    }
-
-    public float GetDistanceFromTime(float t) {
-        if (!distanceLUTGenerated) {
-            GenerateDistanceLUT();
-        }
-
-        t = Mathf.Clamp01(t);
-        int index = Mathf.Clamp(Mathf.FloorToInt(t * (DISTANCE_LUT_COUNT - 1)), 0, DISTANCE_LUT_COUNT - 2);
-        float offseted = t - ((float)index / (float)(DISTANCE_LUT_COUNT - 1));
-        float lerpT = offseted * (float)(DISTANCE_LUT_COUNT - 1);
-        return Mathf.Lerp(distanceLUT[index], distanceLUT[index + 1], lerpT);
-    }
-
     private bool CheckMinimaMaxima(float tValue) {
         return !float.IsNaN(tValue) && Mathf.Clamp01(tValue) == tValue;
     }
 
-    // Again we use Freya Holmer's tutorial to understand the strategy behind generating the bounds: https://youtu.be/aVwxzDHniEw?t=791
-    // This is just the derivative written in terms of t, then plugged into the quadratic formula to solve for zeros.
-    // that gives us our local extremes to generate our bounds on.
-    protected void GenerateBounds() {
-        bounds.Clear();
-        foreach (var weightGroup in weights) {
-            Vector3 a = weightGroup * new Vector4(0f, 0f, 0f, 3f);
-            Vector3 b = weightGroup * new Vector4(0f, 0f, 2f, 0f);
-            Vector3 c = weightGroup * new Vector4(0f, 1f, 0f, 0f);
 
-            // Good ol' quadratic formula. We solve it for each axis (X,Y,Z);
-            float tpx = (-b.x + Mathf.Sqrt(b.x * b.x - 4f * a.x * c.x)) / (2f * a.x);
-            float tpy = (-b.y + Mathf.Sqrt(b.y * b.y - 4f * a.y * c.y)) / (2f * a.y);
-            float tpz = (-b.z + Mathf.Sqrt(b.z * b.z - 4f * a.z * c.z)) / (2f * a.z);
-
-            float tnx = (-b.x - Mathf.Sqrt(b.x * b.x - 4f * a.x * c.x)) / (2f * a.x);
-            float tny = (-b.y - Mathf.Sqrt(b.y * b.y - 4f * a.y * c.y)) / (2f * a.y);
-            float tnz = (-b.z - Mathf.Sqrt(b.z * b.z - 4f * a.z * c.z)) / (2f * a.z);
-
-            Bounds bound = new Bounds(GetPosition(weightGroup, 0f), Vector3.zero);
-            // If the floats are out of our range, or if they're NaN (from a negative sqrt)-- we discard them.
-            if (CheckMinimaMaxima(tpx)) {
-                bound.Encapsulate(GetPosition(weightGroup, tpx));
-            }
-
-            if (CheckMinimaMaxima(tnx)) {
-                bound.Encapsulate(GetPosition(weightGroup, tnx));
-            }
-
-            if (CheckMinimaMaxima(tpy)) {
-                bound.Encapsulate(GetPosition(weightGroup, tpy));
-            }
-
-            if (CheckMinimaMaxima(tny)) {
-                bound.Encapsulate(GetPosition(weightGroup, tny));
-            }
-
-            if (CheckMinimaMaxima(tpz)) {
-                bound.Encapsulate(GetPosition(weightGroup, tpz));
-            }
-
-            if (CheckMinimaMaxima(tnz)) {
-                bound.Encapsulate(GetPosition(weightGroup, tnz));
-            }
-
-            bound.Encapsulate(GetPosition(weightGroup, 1f));
-            bounds.Add(bound);
-        }
-    }
-
-    private void GenerateDistanceLUT() {
-        float dist = 0f;
-        Vector3 lastPosition = GetPositionFromT(0f);
-        distanceLUT[0] = 0f;
-        for (int i = 1; i < DISTANCE_LUT_COUNT; i++) {
-            float t = (float)i / (DISTANCE_LUT_COUNT - 1);
-            Vector3 position = GetPositionFromT(t);
-            dist += Vector3.Distance(lastPosition, position);
-            lastPosition = position;
-            distanceLUT[i] = dist;
-        }
-
-        distanceLUTGenerated = true;
-        arcLength = dist;
-    }
-
-    private void GenerateBinormalLUT() {
-        // https://janakiev.com/blog/framing-parametric-curves/
-        // https://legacy.cs.indiana.edu/ftp/techreports/TR425.pdf
-        // Using parallel transport frames
-        Vector3 lastTangent = GetVelocityFromT(0).normalized;
-        // Initial reference frame, uses Vector3.up
-        Vector3 lastBinormal = Vector3.Cross(GetVelocityFromT(0), Vector3.up).normalized;
-        if (lastBinormal == Vector3.zero) {
-            lastBinormal = Vector3.Cross(GetVelocityFromT(0), -Vector3.forward).normalized;
-        }
-
-        binormalLUT[0] = lastBinormal;
-        for (int i = 1; i < BINORMAL_LUT_COUNT; i++) {
-            float t = (float)i / (BINORMAL_LUT_COUNT);
-            Vector3 tangent = GetVelocityFromT(t).normalized;
-            Vector3 binormal = Vector3.Cross(lastTangent, tangent);
-            if (binormal == Vector3.zero) {
-                binormal = lastBinormal;
-            } else {
-                float theta = Mathf.Acos(Mathf.Clamp(Vector3.Dot(lastTangent, tangent), -1f, 1f));
-                binormal = Quaternion.AngleAxis(theta * Mathf.Rad2Deg, binormal.normalized) * lastBinormal;
-            }
-
-            lastTangent = tangent;
-            lastBinormal = binormal;
-            binormalLUT[i] = binormal;
-        }
-
-        // Undo any twist.
-        //float overallAngle = Vector3.Angle(binormalLUT[0], binormalLUT[resolution-1]);
-        //for(int i=0;i<resolution;i++) {
-        //float t = (float)i/(float)resolution;
-        //binormalLUT[i] = Quaternion.AngleAxis(-overallAngle*t, GetVelocityFromT(t).normalized)*binormalLUT[i];
-        //}
-        binormalLUTGenerated = true;
-    }
-
-    private Spline SetWeights(IList<Matrix4x4> newWeights) {
+    private Spline SetWeights(IList<Vector4> newWeights) {
         weights.Clear();
         weights.AddRange(newWeights);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
         return this;
     }
 
@@ -273,12 +81,12 @@ public class Spline {
         return (value - from1) / (to1 - from1) * (to2 - from2) + from2;
     }
 
-    private static Matrix4x4 CreateWeightMatrix(Matrix4x4 characteristicMatrix, Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3) {
-        var pointMatrix = new Matrix4x4(p0, p1, p2, p3);
-        return pointMatrix * characteristicMatrix;
+    private static Vector4 CreateWeightMatrix(Matrix4x4 characteristicMatrix, float p0, float p1, float p2, float p3) {
+        var pointMatrix = new Vector4(p0, p1, p2, p3);
+        return characteristicMatrix.transpose * pointMatrix;
     }
     
-    private static void GetWeightsWithEndHandles(Matrix4x4 characteristicMatrix, ICollection<Matrix4x4> weightCollection, IList<Vector3> newPoints, Vector3 startHandle, Vector3 endHandle) {
+    private static void GetWeightsWithEndHandles(Matrix4x4 characteristicMatrix, ICollection<Vector4> weightCollection, IList<float> newPoints, float startHandle, float endHandle) {
         var pointCount = newPoints.Count;
         if (pointCount < 2) {
             throw new UnityException("Spline must have at least 2 knots.");
@@ -297,7 +105,7 @@ public class Spline {
         }
     }
 
-    private static void GetWeightsLooped(Matrix4x4 characteristicMatrix, ICollection<Matrix4x4> weightCollection, IList<Vector3> newPoints) {
+    private static void GetWeightsLooped(Matrix4x4 characteristicMatrix, ICollection<Vector4> weightCollection, IList<float> newPoints) {
         var pointCount = newPoints.Count;
         for (int i = 0; i < pointCount; i++) {
             var weightMatrix = CreateWeightMatrix(
@@ -311,7 +119,7 @@ public class Spline {
         }
     }
 
-    private static void GetWeightsBezierKnots(Matrix4x4 characteristicMatrix, ICollection<Matrix4x4> weightCollection, IList<BezierKnot> knots) {
+    private static void GetWeightsBezierKnots(Matrix4x4 characteristicMatrix, ICollection<Vector4> weightCollection, IList<BezierKnot> knots) {
         var knotCount = knots.Count;
         if (knotCount < 2) {
             throw new UnityException("Spline must have at least 2 knots.");
@@ -329,7 +137,7 @@ public class Spline {
             weightCollection.Add(weightMatrix);
         }
     }
-    private static void GetWeightsHermiteKnots(Matrix4x4 characteristicMatrix, ICollection<Matrix4x4> weightCollection, IList<HermiteKnot> knots) {
+    private static void GetWeightsHermiteKnots(Matrix4x4 characteristicMatrix, ICollection<Vector4> weightCollection, IList<HermiteKnot> knots) {
         var knotCount = knots.Count;
         if (knotCount < 2) {
             throw new UnityException("Spline must have at least 2 knots.");
@@ -347,19 +155,6 @@ public class Spline {
             weightCollection.Add(weightMatrix);
         }
     }
-
-    public float GetLengthFromSubsection(int subsectionCount, int subsectionIndex = 0, float subT = 1f) {
-        var multi = (float)subsectionCount / (float)weights.Count;
-        var startT = (float)subsectionIndex / (float)weights.Count;
-        var t = subT * multi + startT;
-        return GetDistanceFromTime(t) - GetDistanceFromTime(startT);
-    }
-
-    [Obsolete("Please use GetLengthFromSubsection instead.")]
-    public float GetDistanceFromSubT(int start, int end, float subT) {
-        int count = end - start;
-        return GetLengthFromSubsection(count, start, subT);
-    }
     
     /// <summary>
     /// Standard Bezier spline
@@ -376,9 +171,6 @@ public class Spline {
             new Vector4(3f, -6f, 3f, 0f),
             new Vector4(-1f, 3f, -3f, 1f)
         ), weights, knots);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
         return this;
     }
     
@@ -397,9 +189,6 @@ public class Spline {
             new Vector4(-3f, -2f, -1f, 3f),
             new Vector4(2f, 1f, 1f, -2)
         ), weights, knots);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
         return this;
     }
     
@@ -408,7 +197,7 @@ public class Spline {
     /// </summary>
     /// <param name="positions">the anchor positions</param>
     /// <returns>The generated Spline</returns>
-    private Spline SetFromBSplinePositionsLooped(IList<Vector3> positions) {
+    private Spline SetFromBSplinePositionsLooped(IList<float> positions) {
         weights.Clear();
         GetWeightsLooped(new Matrix4x4(
             new Vector4(1f, 4f, 1f, 0f) * 1f/6f,
@@ -416,9 +205,6 @@ public class Spline {
             new Vector4(3f, -6f, 3f, 0f) * 1f/6f,
             new Vector4(-1f, 3f, -3f, 1f) * 1f/6f
         ), weights, positions);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
         return this;
     }
     
@@ -429,7 +215,7 @@ public class Spline {
     /// <param name="startHandle">handle for start position</param>
     /// <param name="endHandle">handle for end position</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromBSplinePositions(IList<Vector3> positions, Vector3 startHandle, Vector3 endHandle) {
+    public Spline SetFromBSplinePositions(IList<float> positions, float startHandle, float endHandle) {
         weights.Clear();
         GetWeightsWithEndHandles(new Matrix4x4(
             new Vector4(1f, 4f, 1f, 0f) * 1f/6f,
@@ -437,9 +223,6 @@ public class Spline {
             new Vector4(3f, -6f, 3f, 0f) * 1f/6f,
             new Vector4(-1f, 3f, -3f, 1f) * 1f/6f
         ), weights, positions, startHandle, endHandle);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
         return this;
     }
 
@@ -450,7 +233,7 @@ public class Spline {
     /// <param name="startHandle">handle for start position</param>
     /// <param name="endHandle">handle for end position</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromBSplinePositions(IList<Vector3> positions, bool looped = false) {
+    public Spline SetFromBSplinePositions(IList<float> positions, bool looped = false) {
         if (looped) {
             return SetFromBSplinePositionsLooped(positions);
         }
@@ -465,7 +248,7 @@ public class Spline {
     /// <param name="positions">the anchor positions</param>
     /// <param name="tension">the tension of the spline</param>
     /// <returns>The generated Spline</returns>
-    private Spline SetFromCardinalPositionsLooped(IList<Vector3> positions, float tension) {
+    private Spline SetFromCardinalPositionsLooped(IList<float> positions, float tension) {
         weights.Clear();
         float s = (1f - tension) / 2f;
         GetWeightsLooped(new Matrix4x4(
@@ -474,9 +257,6 @@ public class Spline {
             new Vector4(2f*s, s-3f, 3f-2f*s, -s),
             new Vector4(-s, 2f-s, s-2f, s)
         ), weights, positions);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
         return this;
     }
     
@@ -488,7 +268,7 @@ public class Spline {
     /// <param name="endHandle">handle for end position</param>
     /// <param name="tension">the tension of the spline</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromCardinalPositions(IList<Vector3> positions, Vector3 startHandle, Vector3 endHandle, float tension) {
+    public Spline SetFromCardinalPositions(IList<float> positions, float startHandle, float endHandle, float tension) {
         weights.Clear();
         float s = (1f - tension) / 2f;
         GetWeightsWithEndHandles(new Matrix4x4(
@@ -497,9 +277,6 @@ public class Spline {
             new Vector4(2f*s, s-3f, 3f-2f*s, -s),
             new Vector4(-s, 2f-s, s-2f, s)
         ), weights, positions, startHandle, endHandle);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
         return this;
     }
     
@@ -510,7 +287,7 @@ public class Spline {
     /// <param name="tension">the tension of the spline</param>
     /// <param name="looped">whether the spline is looped</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromCardinalPositions(IList<Vector3> positions, float tension, bool looped = false) {
+    public Spline SetFromCardinalPositions(IList<float> positions, float tension, bool looped = false) {
         if (looped) {
             return SetFromCardinalPositionsLooped(positions, tension);
         }
@@ -524,7 +301,7 @@ public class Spline {
     /// </summary>
     /// <param name="positions">the anchor positions</param>
     /// <returns>The generated Spline</returns>
-    private Spline SetFromCatmullPositionsLooped(IList<Vector3> positions) {
+    private Spline SetFromCatmullPositionsLooped(IList<float> positions) {
         weights.Clear();
         GetWeightsLooped(new Matrix4x4(
             new Vector4(0f, 2f, 0f, 0f)*0.5f,
@@ -532,9 +309,6 @@ public class Spline {
             new Vector4(2f, -5f, 4f, -1f)*0.5f,
             new Vector4(-1f, 3f, -3f, 1f)*0.5f
         ), weights, positions);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
         return this;
     }
 
@@ -545,7 +319,7 @@ public class Spline {
     /// <param name="startHandle">handle for start position</param>
     /// <param name="endHandle">handle for end position</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromCatmullPositions(IList<Vector3> positions, Vector3 startHandle, Vector3 endHandle) {
+    public Spline SetFromCatmullPositions(IList<float> positions, float startHandle, float endHandle) {
         weights.Clear();
         GetWeightsWithEndHandles(new Matrix4x4(
             new Vector4(0f, 2f, 0f, 0f)*0.5f,
@@ -553,9 +327,6 @@ public class Spline {
             new Vector4(2f, -5f, 4f, -1f)*0.5f,
             new Vector4(-1f, 3f, -3f, 1f)*0.5f
         ), weights, positions, startHandle, endHandle);
-        distanceLUTGenerated = false;
-        binormalLUTGenerated = false;
-        bounds.Clear();
         return this;
     }
 
@@ -565,7 +336,7 @@ public class Spline {
     /// <param name="positions">the anchor positions</param>
     /// <param name="looped">whether the spline should be looped</param>
     /// <returns>The generated Spline</returns>
-    public Spline SetFromCatmullPositions(IList<Vector3> positions, bool looped = false) {
+    public Spline SetFromCatmullPositions(IList<float> positions, bool looped = false) {
         if (looped) {
             return SetFromCatmullPositionsLooped(positions);
         }
@@ -574,43 +345,13 @@ public class Spline {
         return SetFromCatmullPositions(positions, startHandle, endHandle);
     }
 
-    public float GetClosestTimeFromPositionFast(Vector3 position, int samples = 32) {
-        // Broad pass that just finds the closest bounds
-        int closestBounds = 0;
-        float distToBounds = float.MaxValue;
-        List<Bounds> curveBounds = GetBounds();
-        for (int i = 0; i < curveBounds.Count; i++) {
-            float dist = Vector3.Distance(curveBounds[i].ClosestPoint(position), position);
-            if (dist < distToBounds) {
-                closestBounds = i;
-                distToBounds = dist;
-            }
-        }
-
-        // With the closest sub-curve found, we can then do some very deliberate samples.
-        float closestTValue = 0f;
-        float distToCurve = float.MaxValue;
-        for (int i = 0; i < samples; i++) {
-            float tSample = (float)i / (float)samples;
-            Vector3 samplePosition = SampleCurveSegmentPosition(closestBounds, tSample);
-            float dist = Vector3.Distance(samplePosition, position);
-            if (dist < distToCurve) {
-                closestTValue = tSample;
-                distToCurve = dist;
-            }
-        }
-
-        // Just gotta take it from subT to overall t value
-        return closestTValue / (float)(curveBounds.Count) + ((float)closestBounds / (float)(curveBounds.Count));
-    }
-
-    public float GetClosestTimeFromPosition(Vector3 position, int samples = 32) {
+    public float GetClosestTimeFromPosition(float position, int samples = 32) {
         var closestTValue = 0f;
         var distToCurve = float.MaxValue;
         for (int i = 0; i < samples; i++) {
             var tSample = (float)i / (float)samples;
-            Vector3 samplePosition = GetPositionFromT(tSample);
-            var dist = Vector3.Distance(samplePosition, position);
+            float samplePosition = GetPositionFromT(tSample);
+            var dist = Mathf.Abs(samplePosition-position);
             if (dist < distToCurve) {
                 closestTValue = tSample;
                 distToCurve = dist;
@@ -620,25 +361,18 @@ public class Spline {
         return closestTValue;
     }
 
-    public Vector3 GetPositionFromDistance(float distance) {
-        var t = GetTimeFromDistance(distance);
-        return GetPositionFromT(t);
-    }
-
-    public Vector3 GetPositionFromT(float t) {
+    public float GetPositionFromT(float t) {
         switch (t) {
             case < 0f: {
-                var arclength = arcLength;
                 var vel = SampleCurveSegmentVelocity(0, 0f);
                 var pos = SampleCurveSegmentPosition(0, 0f);
-                return pos + vel.normalized * (t * arclength);
+                return pos + Mathf.Sign(vel) * t;
             }
             case > 1f: {
-                var arclength = arcLength;
                 var endSegment = weights.Count - 1;
                 var vel = SampleCurveSegmentVelocity(endSegment, 1f);
                 var pos = SampleCurveSegmentPosition(endSegment, 1f);
-                return pos + vel.normalized * ((t-1f) * arclength);
+                return pos + Mathf.Sign(vel) * (t-1f);
             }
             default: {
                 var subT = GetCurveSegmentTimeFromCurveTime(out var curveSegmentIndex, t);
@@ -647,25 +381,15 @@ public class Spline {
         }
     }
 
-    public Vector3 GetVelocityFromDistance(float distance) {
-        var t = GetTimeFromDistance(distance);
-        return GetVelocityFromT(t);
-    }
-
-    public Vector3 GetAccelerationFromDistance(float distance) {
-        var t = GetTimeFromDistance(distance);
-        return GetAccelerationFromT(t);
-    }
-
-    public Vector3 GetVelocityFromT(float t) {
+    public float GetVelocityFromT(float t) {
         switch (t) {
             case < 0f: {
                 var vel = SampleCurveSegmentVelocity(0, 0f);
-                return vel.normalized;
+                return vel;
             }
             case > 1f: {
                 var vel = SampleCurveSegmentVelocity(weights.Count - 1, 1f);
-                return vel.normalized;
+                return vel;
             }
             default: {
                 var subT = GetCurveSegmentTimeFromCurveTime(out var curveSegmentIndex, t);
@@ -674,154 +398,17 @@ public class Spline {
         }
     }
 
-    public Vector3 GetAccelerationFromT(float t) {
+    public float GetAccelerationFromT(float t) {
         switch (t) {
             case < 0f:
             case > 1f:
-                return Vector3.zero;
+                return 0f;
             default: {
                 var subT = GetCurveSegmentTimeFromCurveTime(out var curveSegmentIndex, t);
                 return SampleCurveSegmentAcceleration(curveSegmentIndex, subT);
             }
         }
     }
-
-    public Vector3 GetBinormalFromT(float t) {
-        if (!binormalLUTGenerated) {
-            GenerateBinormalLUT();
-        }
-
-        var index = Mathf.Clamp(Mathf.FloorToInt(t * (BINORMAL_LUT_COUNT - 1)), 0, BINORMAL_LUT_COUNT - 2);
-        var offseted = t - ((float)index / (float)(BINORMAL_LUT_COUNT - 1));
-        var lerpT = offseted * (float)(BINORMAL_LUT_COUNT - 1);
-        return Vector3.Lerp(binormalLUT[index], binormalLUT[index + 1], lerpT);
-    }
-
-    public Matrix4x4 GetBasisFromT(float t) {
-        Vector3 tangent = GetVelocityFromT(t).normalized;
-        Vector3 binormal = GetBinormalFromT(t).normalized;
-        Vector3 normal = Vector3.Cross(tangent, binormal);
-        Vector3.OrthoNormalize(ref tangent, ref binormal, ref normal);
-
-        // Change of basis https://math.stackexchange.com/questions/3540973/change-of-coordinates-and-change-of-basis-matrices
-        // It also shows up here: https://docs.unity3d.com/ScriptReference/Vector3.OrthoNormalize.html
-        Matrix4x4 bezierBasis = new Matrix4x4();
-        bezierBasis.SetRow(0, binormal); // Our X axis
-        bezierBasis.SetRow(1, normal); // Y Axis
-        bezierBasis.SetRow(2, tangent); // Z Axis
-        bezierBasis[3, 3] = 1f;
-        // Change of basis formula is B = P⁻¹ * A * P, where P is the basis transform.
-        return bezierBasis.inverse;
-    }
-
-    public Matrix4x4 GetReferenceFrameFromT(float t) {
-        return Matrix4x4.Translate(GetPositionFromT(t)) * GetBasisFromT(t);
-    }
-
-    public void DebugDraw(Color splineColor, Color knotColor, float duration = 0f) {
-        DebugDrawSpline(this, splineColor, knotColor, duration);
-    }
-    
-    public void GizmoDraw(Color splineColor, Color knotColor, int resolution = 64) {
-        GizmosDrawSpline(this, splineColor, knotColor);
-    }
-
-    private const float knotSize = 0.025f;
-
-    private static void DrawBox(Vector3 position, Quaternion rotation, Vector3 extents, Color color, float duration = 0f) {
-        Debug.DrawLine(rotation * new Vector3(-extents.x, extents.y, -extents.z) + position,
-            rotation * new Vector3(extents.x, extents.y, -extents.z) + position, color, duration);
-        Debug.DrawLine(rotation * new Vector3(-extents.x, extents.y, -extents.z) + position,
-            rotation * new Vector3(-extents.x, extents.y, extents.z) + position, color, duration);
-        Debug.DrawLine(rotation * new Vector3(-extents.x, extents.y, extents.z) + position,
-            rotation * new Vector3(extents.x, extents.y, extents.z) + position, color, duration);
-        Debug.DrawLine(rotation * new Vector3(extents.x, extents.y, -extents.z) + position,
-            rotation * new Vector3(extents.x, extents.y, extents.z) + position, color, duration);
-        Debug.DrawLine(rotation * new Vector3(-extents.x, -extents.y, -extents.z) + position,
-            rotation * new Vector3(-extents.x, extents.y, -extents.z) + position, color, duration);
-        Debug.DrawLine(rotation * new Vector3(extents.x, -extents.y, -extents.z) + position,
-            rotation * new Vector3(extents.x, extents.y, -extents.z) + position, color, duration);
-        Debug.DrawLine(rotation * new Vector3(-extents.x, -extents.y, extents.z) + position,
-            rotation * new Vector3(-extents.x, extents.y, extents.z) + position, color, duration);
-        Debug.DrawLine(rotation * new Vector3(extents.x, -extents.y, extents.z) + position,
-            rotation * new Vector3(extents.x, extents.y, extents.z) + position, color, duration);
-        Debug.DrawLine(rotation * new Vector3(-extents.x, -extents.y, -extents.z) + position,
-            rotation * new Vector3(extents.x, -extents.y, -extents.z) + position, color, duration);
-        Debug.DrawLine(rotation * new Vector3(-extents.x, -extents.y, -extents.z) + position,
-            rotation * new Vector3(-extents.x, -extents.y, extents.z) + position, color, duration);
-        Debug.DrawLine(rotation * new Vector3(-extents.x, -extents.y, extents.z) + position,
-            rotation * new Vector3(extents.x, -extents.y, extents.z) + position, color, duration);
-        Debug.DrawLine(rotation * new Vector3(extents.x, -extents.y, -extents.z) + position,
-            rotation * new Vector3(extents.x, -extents.y, extents.z) + position, color, duration);
-    }
-
-    public static void DebugDrawSpline(Spline spline, Color splineColor, Color knotColor, float duration = 0f) {
-        Vector3 current = spline.GetPositionFromT(0f);
-        for (int i = 1; i < 64; i++) {
-            Vector3 next = spline.GetPositionFromT((float)i / 63);
-            Debug.DrawLine(current, next, splineColor, duration);
-            current = next;
-        }
-
-        for (int i = 0; i < spline.GetWeights().Count; i++) {
-            var weight = spline.GetWeights()[i];
-            var startPos = GetPosition(weight, 0f);
-            var startVel = GetVelocity(weight, 0f).normalized;
-            float t = (float)i / (spline.GetWeights().Count - 1);
-            var startBinormal = spline.GetBinormalFromT(t);
-            Quaternion rot = startVel != startBinormal && startVel != Vector3.zero
-                ? Quaternion.LookRotation(startVel, startBinormal)
-                : Quaternion.identity;
-            DrawBox(startPos, rot, (Vector3.one - Vector3.forward * 0.8f) * knotSize, knotColor, duration);
-        }
-
-        var endPos = GetPosition(spline.GetWeights()[^1], 1f);
-        var endVel = GetVelocity(spline.GetWeights()[^1], 1f).normalized;
-        var endBinormal = spline.GetBinormalFromT(1f);
-        Quaternion endRot = endVel != endBinormal && endVel != Vector3.zero
-            ? Quaternion.LookRotation(endVel, endBinormal)
-            : Quaternion.identity;
-        DrawBox(endPos, endRot, (Vector3.one - Vector3.forward * 0.8f) * knotSize, knotColor, duration);
-    }
-
-    public static void GizmosDrawSpline(Spline spline, Color splineColor, Color knotColor, int resolution = 64) {
-        var oldColor = Gizmos.color;
-        Gizmos.color = splineColor;
-        Vector3 lastPoint = spline.GetPositionFromT(0f);
-        for (int i = 0; i <= resolution; i++) {
-            Vector3 newPoint = spline.GetPositionFromT((float)i / resolution);
-            Gizmos.DrawLine(lastPoint, newPoint);
-            lastPoint = newPoint;
-        }
-
-        var save = Gizmos.matrix;
-        for (int i = 0; i < spline.GetWeights().Count; i++) {
-            var weight = spline.GetWeights()[i];
-            float t = (float)i / (spline.GetWeights().Count - 1);
-            Vector3 pointA = GetPosition(weight, 0f);
-            var startVel = GetVelocity(weight, 0f).normalized;
-            var startBinormal = spline.GetBinormalFromT(t);
-            Quaternion rot = startVel != startBinormal && startVel != Vector3.zero
-                ? Quaternion.LookRotation(startVel, startBinormal)
-                : Quaternion.identity;
-            Gizmos.color = knotColor;
-            Gizmos.matrix = Matrix4x4.TRS(pointA, rot, Vector3.one - Vector3.forward * 0.8f);
-            Gizmos.DrawWireCube(Vector3.zero, Vector3.one * knotSize);
-        }
-
-        var endPos = GetPosition(spline.GetWeights()[^1], 1f);
-        var endVel = GetVelocity(spline.GetWeights()[^1], 1f).normalized;
-        var endBinormal = spline.GetBinormalFromT(1);
-        Quaternion endRot = endVel != endBinormal && endVel != Vector3.zero
-            ? Quaternion.LookRotation(endVel, endBinormal)
-            : Quaternion.identity;
-        Gizmos.matrix = Matrix4x4.TRS(endPos, endRot, Vector3.one - Vector3.forward * 0.8f);
-        Gizmos.DrawWireCube(Vector3.zero, Vector3.one * knotSize);
-
-        Gizmos.matrix = save;
-        Gizmos.color = oldColor;
-    }
-    
 }
 
 }
