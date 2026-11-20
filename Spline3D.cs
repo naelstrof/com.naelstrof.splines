@@ -22,6 +22,7 @@ public class Spline3D {
 
     private bool distanceLUTGenerated = false;
     private bool binormalLUTGenerated = false;
+    private Vector3 binormalLUTStartingUp = Vector3.zero;
     private List<Matrix4x4> weights = new();
     private float[] distanceLUT = new float[DISTANCE_LUT_COUNT];
     private Vector3[] binormalLUT = new Vector3[BINORMAL_LUT_COUNT];
@@ -90,9 +91,9 @@ public class Spline3D {
         return distanceLUT;
     }
 
-    private Vector3[] GetBinormalLUT() {
-        if (!binormalLUTGenerated) {
-            GenerateBinormalLUT();
+    private Vector3[] GetBinormalLUT(Vector3 startingUp) {
+        if (!binormalLUTGenerated || startingUp != binormalLUTStartingUp) {
+            GenerateBinormalLUT(startingUp);
         }
 
         return binormalLUT;
@@ -223,15 +224,15 @@ public class Spline3D {
         arcLength = dist;
     }
 
-    private void GenerateBinormalLUT() {
+    private void GenerateBinormalLUT(Vector3 startingUp) {
         // https://janakiev.com/blog/framing-parametric-curves/
         // https://legacy.cs.indiana.edu/ftp/techreports/TR425.pdf
         // Using parallel transport frames
         Vector3 lastTangent = GetVelocityFromT(0).normalized;
         // Initial reference frame, uses Vector3.up
-        Vector3 lastBinormal = Vector3.Cross(GetVelocityFromT(0), Vector3.up).normalized;
+        Vector3 lastBinormal = Vector3.Cross(GetVelocityFromT(0), startingUp).normalized;
         if (lastBinormal == Vector3.zero) {
-            lastBinormal = Vector3.Cross(GetVelocityFromT(0), -Vector3.forward).normalized;
+            lastBinormal = Vector3.Cross(GetVelocityFromT(0), new Vector3(startingUp.z, startingUp.x, startingUp.y)).normalized;
         }
 
         binormalLUT[0] = lastBinormal;
@@ -686,9 +687,9 @@ public class Spline3D {
         }
     }
 
-    public Vector3 GetBinormalFromT(float t) {
-        if (!binormalLUTGenerated) {
-            GenerateBinormalLUT();
+    public Vector3 GetBinormalFromT(float t, Vector3 startingUp) {
+        if (!binormalLUTGenerated || startingUp != binormalLUTStartingUp) {
+            GenerateBinormalLUT(startingUp);
         }
 
         var index = Mathf.Clamp(Mathf.FloorToInt(t * (BINORMAL_LUT_COUNT - 1)), 0, BINORMAL_LUT_COUNT - 2);
@@ -697,9 +698,9 @@ public class Spline3D {
         return Vector3.Lerp(binormalLUT[index], binormalLUT[index + 1], lerpT);
     }
 
-    public Matrix4x4 GetBasisFromT(float t) {
+    public Matrix4x4 GetBasisFromT(float t, Vector3 startingUp) {
         Vector3 tangent = GetVelocityFromT(t).normalized;
-        Vector3 binormal = GetBinormalFromT(t).normalized;
+        Vector3 binormal = GetBinormalFromT(t, startingUp).normalized;
         Vector3 normal = Vector3.Cross(tangent, binormal);
         Vector3.OrthoNormalize(ref tangent, ref binormal, ref normal);
 
@@ -714,8 +715,8 @@ public class Spline3D {
         return bezierBasis.inverse;
     }
 
-    public Matrix4x4 GetReferenceFrameFromT(float t) {
-        return Matrix4x4.Translate(GetPositionFromT(t)) * GetBasisFromT(t);
+    public Matrix4x4 GetReferenceFrameFromT(float t, Vector3 startingUp) {
+        return Matrix4x4.Translate(GetPositionFromT(t)) * GetBasisFromT(t, startingUp);
     }
 
     public void DebugDraw(Color splineColor, Color knotColor, float duration = 0f) {
@@ -768,7 +769,7 @@ public class Spline3D {
             var startPos = GetPosition(weight, 0f);
             var startVel = GetVelocity(weight, 0f).normalized;
             float t = (float)i / (spline3D.GetWeights().Count - 1);
-            var startBinormal = spline3D.GetBinormalFromT(t);
+            var startBinormal = spline3D.GetBinormalFromT(t, Vector3.up);
             Quaternion rot = startVel != startBinormal && startVel != Vector3.zero
                 ? Quaternion.LookRotation(startVel, startBinormal)
                 : Quaternion.identity;
@@ -777,7 +778,7 @@ public class Spline3D {
 
         var endPos = GetPosition(spline3D.GetWeights()[^1], 1f);
         var endVel = GetVelocity(spline3D.GetWeights()[^1], 1f).normalized;
-        var endBinormal = spline3D.GetBinormalFromT(1f);
+        var endBinormal = spline3D.GetBinormalFromT(1f, Vector3.up);
         Quaternion endRot = endVel != endBinormal && endVel != Vector3.zero
             ? Quaternion.LookRotation(endVel, endBinormal)
             : Quaternion.identity;
@@ -800,7 +801,7 @@ public class Spline3D {
             float t = (float)i / (spline3D.GetWeights().Count - 1);
             Vector3 pointA = GetPosition(weight, 0f);
             var startVel = GetVelocity(weight, 0f).normalized;
-            var startBinormal = spline3D.GetBinormalFromT(t);
+            var startBinormal = spline3D.GetBinormalFromT(t, Vector3.up);
             Quaternion rot = startVel != startBinormal && startVel != Vector3.zero
                 ? Quaternion.LookRotation(startVel, startBinormal)
                 : Quaternion.identity;
@@ -811,7 +812,7 @@ public class Spline3D {
 
         var endPos = GetPosition(spline3D.GetWeights()[^1], 1f);
         var endVel = GetVelocity(spline3D.GetWeights()[^1], 1f).normalized;
-        var endBinormal = spline3D.GetBinormalFromT(1);
+        var endBinormal = spline3D.GetBinormalFromT(1f, Vector3.up);
         Quaternion endRot = endVel != endBinormal && endVel != Vector3.zero
             ? Quaternion.LookRotation(endVel, endBinormal)
             : Quaternion.identity;

@@ -5,6 +5,7 @@ using UnityEngine;
 namespace GatorDragonGames {
 
 public class Spline {
+    public const int DISTANCE_LUT_COUNT = 32;
     public struct BezierKnot {
         public float backHandle;
         public float position;
@@ -17,6 +18,55 @@ public class Spline {
     }
 
     private List<Vector4> weights = new();
+    
+    private bool distanceLUTGenerated = false;
+    private float[] distanceLUT = new float[DISTANCE_LUT_COUNT];
+    
+    private float _arcLength;
+
+    public float arcLength {
+        get {
+            if (!distanceLUTGenerated) {
+                GenerateDistanceLUT();
+            }
+
+            return _arcLength;
+        }
+        private set => _arcLength = value;
+    }
+
+    private void GenerateDistanceLUT() {
+        float dist = 0f;
+        float lastPosition = GetPositionFromT(0f);
+        distanceLUT[0] = 0f;
+        for (int i = 1; i < DISTANCE_LUT_COUNT; i++) {
+            float t = (float)i / (DISTANCE_LUT_COUNT - 1);
+            float position = GetPositionFromT(t);
+            dist += Mathf.Abs(lastPosition - position);
+            lastPosition = position;
+            distanceLUT[i] = dist;
+        }
+
+        distanceLUTGenerated = true;
+        arcLength = dist;
+    }
+    
+    public float GetTimeFromDistance(float distance) {
+        if (!distanceLUTGenerated) {
+            GenerateDistanceLUT();
+        }
+
+        if (distance > 0f && distance < arcLength) {
+            for (int i = 0; i < DISTANCE_LUT_COUNT - 1; i++) {
+                if (distance > distanceLUT[i] && distance < distanceLUT[i + 1]) {
+                    return Remap(distance, distanceLUT[i], distanceLUT[i + 1],
+                        (float)i / (float)(DISTANCE_LUT_COUNT - 1), (float)(i + 1) / (float)(DISTANCE_LUT_COUNT - 1));
+                }
+            }
+        }
+
+        return distance / arcLength;
+    }
 
     public Spline() {
         SetFromCatmullPositions(new [] { 0f, 1f });
@@ -94,6 +144,7 @@ public class Spline {
         for (int i = 0; i < pointCount-1; i++) {
             var previousPoint = i == 0 ? startHandle : newPoints[i - 1];
             var nextPoint = i == pointCount - 2 ? endHandle : newPoints[i + 2];
+            
             var weightMatrix = CreateWeightMatrix(
                 characteristicMatrix, 
                 previousPoint, 
@@ -250,12 +301,12 @@ public class Spline {
     /// <returns>The generated Spline</returns>
     private Spline SetFromCardinalPositionsLooped(IList<float> positions, float tension) {
         weights.Clear();
-        float s = (1f - tension) / 2f;
+        float k = 1f - tension;
         GetWeightsLooped(new Matrix4x4(
             new Vector4(0f, 1f, 0f, 0f),
-            new Vector4(-s, 0f, s, 0f),
-            new Vector4(2f*s, s-3f, 3f-2f*s, -s),
-            new Vector4(-s, 2f-s, s-2f, s)
+            new Vector4(-0.5f * k, -tension, 0.5f * k + tension, 0f),
+            new Vector4(k, -2.5f * k, 2f * k, -0.5f * k),
+            new Vector4(-0.5f * k, 1.5f * k, -1.5f * k, 0.5f * k)
         ), weights, positions);
         return this;
     }
@@ -270,13 +321,38 @@ public class Spline {
     /// <returns>The generated Spline</returns>
     public Spline SetFromCardinalPositions(IList<float> positions, float startHandle, float endHandle, float tension) {
         weights.Clear();
-        float s = (1f - tension) / 2f;
+        float k = 1f - tension;
+        GetWeightsWithEndHandles(new Matrix4x4(
+                new Vector4(0f, 1f, 0f, 0f),
+                new Vector4(-0.5f * k, -tension, 0.5f * k + tension, 0f),
+                new Vector4(k, -2.5f * k, 2f * k, -0.5f * k),
+                new Vector4(-0.5f * k, 1.5f * k, -1.5f * k, 0.5f * k)
+            ), weights, positions, startHandle, endHandle);
+        return this;
+    }
+    
+    private Spline SetFromLinearLooped(IList<float> positions) {
+        weights.Clear();
+        GetWeightsLooped(new Matrix4x4(
+            new Vector4(0f, 1f, 0f, 0f),
+            new Vector4(0f, -1f, 1f, 0f),
+            Vector4.zero,
+            Vector4.zero 
+        ), weights, positions);
+        return this;
+    }
+    
+    public Spline SetFromLinearPositions(IList<float> positions, bool looped = false) {
+        if (looped) {
+            return SetFromLinearLooped(positions);
+        }
+        weights.Clear();
         GetWeightsWithEndHandles(new Matrix4x4(
             new Vector4(0f, 1f, 0f, 0f),
-            new Vector4(-s, 0f, s, 0f),
-            new Vector4(2f*s, s-3f, 3f-2f*s, -s),
-            new Vector4(-s, 2f-s, s-2f, s)
-        ), weights, positions, startHandle, endHandle);
+            new Vector4(0f, -1f, 1f, 0f),
+            Vector4.zero,
+            Vector4.zero 
+        ), weights, positions, 0, 0);
         return this;
     }
     
@@ -407,6 +483,23 @@ public class Spline {
                 var subT = GetCurveSegmentTimeFromCurveTime(out var curveSegmentIndex, t);
                 return SampleCurveSegmentAcceleration(curveSegmentIndex, subT);
             }
+        }
+    }
+    public void DrawGizmos(Color lineColor, int samples = 64) {
+        Gizmos.color = Color.blue;
+        Gizmos.DrawLine(new Vector3(0, 0, 0f), new Vector3(1f, 0f, 0f));
+        Gizmos.DrawLine(new Vector3(0, 0, 0f), new Vector3(0f, 1f, 0f));
+        Gizmos.DrawLine(new Vector3(1f, 0, 0f), new Vector3(1f, 1f, 0f));
+        Gizmos.DrawLine(new Vector3(0f, 1f, 0f), new Vector3(1f, 1f, 0f));
+        Gizmos.color = lineColor;
+        var previousPoint = GetPositionFromT(0f);
+        var previousT = 0f;
+        for (int i = 1; i <= samples; i++) {
+            var tSample = (float)i / (float)samples;
+            var currentPoint = GetPositionFromT(tSample);
+            Gizmos.DrawLine(new Vector3(previousT, previousPoint, 0f), new Vector3(tSample, currentPoint, 0f));
+            previousPoint = currentPoint;
+            previousT = tSample;
         }
     }
 }
