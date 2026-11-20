@@ -123,6 +123,7 @@ public class Spline {
 
     private Spline SetWeights(IList<Vector4> newWeights) {
         weights.Clear();
+        distanceLUTGenerated = false;
         weights.AddRange(newWeights);
         return this;
     }
@@ -216,6 +217,7 @@ public class Spline {
     /// <returns>The generated Spline</returns>
     public Spline SetFromBezierKnots(IList<BezierKnot> knots) {
         weights.Clear();
+        distanceLUTGenerated = false;
         GetWeightsBezierKnots(new Matrix4x4(
             new Vector4(1f, 0f, 0f, 0f),
             new Vector4(-3f, 3f, 0f, 0f),
@@ -234,6 +236,7 @@ public class Spline {
     /// <returns>The generated Spline</returns>
     public Spline SetFromHermiteKnots(IList<HermiteKnot> knots) {
         weights.Clear();
+        distanceLUTGenerated = false;
         GetWeightsHermiteKnots(new Matrix4x4(
             new Vector4(1f, 0f, 0f, 0f),
             new Vector4(0f, 1f, 0f, 0f),
@@ -250,6 +253,7 @@ public class Spline {
     /// <returns>The generated Spline</returns>
     private Spline SetFromBSplinePositionsLooped(IList<float> positions) {
         weights.Clear();
+        distanceLUTGenerated = false;
         GetWeightsLooped(new Matrix4x4(
             new Vector4(1f, 4f, 1f, 0f) * 1f/6f,
             new Vector4(-3f, 0f, 3f, 0f) * 1f/6f,
@@ -268,6 +272,7 @@ public class Spline {
     /// <returns>The generated Spline</returns>
     public Spline SetFromBSplinePositions(IList<float> positions, float startHandle, float endHandle) {
         weights.Clear();
+        distanceLUTGenerated = false;
         GetWeightsWithEndHandles(new Matrix4x4(
             new Vector4(1f, 4f, 1f, 0f) * 1f/6f,
             new Vector4(-3f, 0f, 3f, 0f) * 1f/6f,
@@ -301,6 +306,7 @@ public class Spline {
     /// <returns>The generated Spline</returns>
     private Spline SetFromCardinalPositionsLooped(IList<float> positions, float tension) {
         weights.Clear();
+        distanceLUTGenerated = false;
         float k = 1f - tension;
         GetWeightsLooped(new Matrix4x4(
             new Vector4(0f, 1f, 0f, 0f),
@@ -321,6 +327,7 @@ public class Spline {
     /// <returns>The generated Spline</returns>
     public Spline SetFromCardinalPositions(IList<float> positions, float startHandle, float endHandle, float tension) {
         weights.Clear();
+        distanceLUTGenerated = false;
         float k = 1f - tension;
         GetWeightsWithEndHandles(new Matrix4x4(
                 new Vector4(0f, 1f, 0f, 0f),
@@ -333,6 +340,7 @@ public class Spline {
     
     private Spline SetFromLinearLooped(IList<float> positions) {
         weights.Clear();
+        distanceLUTGenerated = false;
         GetWeightsLooped(new Matrix4x4(
             new Vector4(0f, 1f, 0f, 0f),
             new Vector4(0f, -1f, 1f, 0f),
@@ -347,6 +355,7 @@ public class Spline {
             return SetFromLinearLooped(positions);
         }
         weights.Clear();
+        distanceLUTGenerated = false;
         GetWeightsWithEndHandles(new Matrix4x4(
             new Vector4(0f, 1f, 0f, 0f),
             new Vector4(0f, -1f, 1f, 0f),
@@ -379,6 +388,7 @@ public class Spline {
     /// <returns>The generated Spline</returns>
     private Spline SetFromCatmullPositionsLooped(IList<float> positions) {
         weights.Clear();
+        distanceLUTGenerated = false;
         GetWeightsLooped(new Matrix4x4(
             new Vector4(0f, 2f, 0f, 0f)*0.5f,
             new Vector4(-1f, 0f, 1f, 0f)*0.5f,
@@ -397,6 +407,7 @@ public class Spline {
     /// <returns>The generated Spline</returns>
     public Spline SetFromCatmullPositions(IList<float> positions, float startHandle, float endHandle) {
         weights.Clear();
+        distanceLUTGenerated = false;
         GetWeightsWithEndHandles(new Matrix4x4(
             new Vector4(0f, 2f, 0f, 0f)*0.5f,
             new Vector4(-1f, 0f, 1f, 0f)*0.5f,
