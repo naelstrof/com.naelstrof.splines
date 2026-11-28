@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using Unity.Collections;
 using UnityEngine;
 
 namespace GatorDragonGames {
@@ -16,51 +15,30 @@ public struct Spline {
         public float velocity;
     }
 
-    private FixedList512Bytes<Vector4> weights;
-    
-    private bool distanceLUTGenerated;
-    private FixedList128Bytes<float> distanceLUT;
-    public const int DISTANCE_LUT_COUNT = ((128-6)/sizeof(float));
-    
-    private float _arcLength;
-
-    public float arcLength {
-        get {
-            GenerateDistanceLUT();
-            return _arcLength;
-        }
-        private set => _arcLength = value;
-    }
+    private FixedListVector4x16 weights;
+    private FixedArrayFloat32 distanceLUT;
+    private float arcLength;
 
     private void GenerateDistanceLUT() {
-        if (distanceLUTGenerated) {
-            return;
-        }
-        
         float dist = 0f;
         float lastPosition = GetPositionFromT(0f);
-        distanceLUT.Clear();
-        distanceLUT.Add(0f);
-        for (int i = 1; i < DISTANCE_LUT_COUNT; i++) {
-            float t = (float)i / (DISTANCE_LUT_COUNT - 1);
+        distanceLUT[0] = 0f;
+        for (int i = 1; i < FixedArrayFloat32.sampleCount; i++) {
+            float t = (float)i / (FixedArrayFloat32.sampleCount - 1);
             float position = GetPositionFromT(t);
             dist += Mathf.Abs(lastPosition - position);
             lastPosition = position;
-            distanceLUT.Add(dist);
+            distanceLUT[i] = dist;
         }
-
-        distanceLUTGenerated = true;
         arcLength = dist;
     }
     
     public float GetTimeFromDistance(float distance) {
-        GenerateDistanceLUT();
-
         if (distance > 0f && distance < arcLength) {
-            for (int i = 0; i < DISTANCE_LUT_COUNT - 1; i++) {
+            for (int i = 0; i < FixedArrayFloat32.sampleCount - 1; i++) {
                 if (distance > distanceLUT[i] && distance < distanceLUT[i + 1]) {
                     return Remap(distance, distanceLUT[i], distanceLUT[i + 1],
-                        (float)i / (float)(DISTANCE_LUT_COUNT - 1), (float)(i + 1) / (float)(DISTANCE_LUT_COUNT - 1));
+                        (float)i / (float)(FixedArrayFloat32.sampleCount - 1), (float)(i + 1) / (float)(FixedArrayFloat32.sampleCount - 1));
                 }
             }
         }
@@ -68,16 +46,12 @@ public struct Spline {
         return distance / arcLength;
     }
 
-    private Spline(FixedList512Bytes<Vector4> weights) : this() {
+    private Spline(FixedListVector4x16 weights) : this() {
         SetWeights(weights);
     }
 
     private static Spline Lerp(Spline a, Spline b, float t) {
-        FixedList512Bytes<Vector4> merged = a.weights;
-        for (int i = 0; i < merged.Length; i++) {
-            merged[i] = Vector4.Lerp(merged[i], b.weights[i], t);
-        }
-        return new Spline(merged);
+        return new Spline(FixedListVector4x16.Lerp(a.weights, b.weights, t));
     }
 
     private static float GetPosition(Vector4 weightBlock, float t) {
@@ -92,7 +66,7 @@ public struct Spline {
         return Vector4.Dot(weightBlock, new Vector4(0f, 0f, 2f, 6f * t));
     }
 
-    private FixedList512Bytes<Vector4> GetWeights() => weights;
+    private FixedListVector4x16 GetWeights() => weights;
 
     private float SampleCurveSegmentPosition(int curveSegmentIndex, float t) {
         return GetPosition(weights[curveSegmentIndex], t);
@@ -117,9 +91,9 @@ public struct Spline {
         return !float.IsNaN(tValue) && Mathf.Clamp01(tValue) == tValue;
     }
 
-    private void SetWeights(FixedList512Bytes<Vector4> newWeights) {
+    private void SetWeights(FixedListVector4x16 newWeights) {
         weights = newWeights;
-        distanceLUTGenerated = false;
+        GenerateDistanceLUT();
     }
 
     private static float Remap(float value, float from1, float to1, float from2, float to2) {
@@ -131,7 +105,7 @@ public struct Spline {
         return characteristicMatrix.transpose * pointMatrix;
     }
     
-    private static void GetWeightsWithEndHandles(Matrix4x4 characteristicMatrix, ref FixedList512Bytes<Vector4> weightCollection, IList<float> newPoints, float startHandle, float endHandle) {
+    private static void GetWeightsWithEndHandles(Matrix4x4 characteristicMatrix, ref FixedListVector4x16 weightCollection, IList<float> newPoints, float startHandle, float endHandle) {
         weightCollection.Clear();
         var pointCount = newPoints.Count;
         if (pointCount < 2) {
@@ -152,7 +126,7 @@ public struct Spline {
         }
     }
 
-    private static void GetWeightsLooped(Matrix4x4 characteristicMatrix, ref FixedList512Bytes<Vector4> weightCollection, IList<float> newPoints) {
+    private static void GetWeightsLooped(Matrix4x4 characteristicMatrix, ref FixedListVector4x16 weightCollection, IList<float> newPoints) {
         weightCollection.Clear();
         var pointCount = newPoints.Count;
         for (int i = 0; i < pointCount; i++) {
@@ -167,7 +141,7 @@ public struct Spline {
         }
     }
 
-    private static void GetWeightsBezierKnots(Matrix4x4 characteristicMatrix, ref FixedList512Bytes<Vector4> weightCollection, IList<BezierKnot> knots) {
+    private static void GetWeightsBezierKnots(Matrix4x4 characteristicMatrix, ref FixedListVector4x16 weightCollection, IList<BezierKnot> knots) {
         weightCollection.Clear();
         var knotCount = knots.Count;
         if (knotCount < 2) {
@@ -186,7 +160,7 @@ public struct Spline {
             weightCollection.Add(weightMatrix);
         }
     }
-    private static void GetWeightsHermiteKnots(Matrix4x4 characteristicMatrix, ref FixedList512Bytes<Vector4> weightCollection, IList<HermiteKnot> knots) {
+    private static void GetWeightsHermiteKnots(Matrix4x4 characteristicMatrix, ref FixedListVector4x16 weightCollection, IList<HermiteKnot> knots) {
         weightCollection.Clear();
         var knotCount = knots.Count;
         if (knotCount < 2) {
@@ -213,13 +187,13 @@ public struct Spline {
     /// </summary>
     /// <param name="knots">The spline knots defining the curve.</param>
     public void SetFromBezierKnots(IList<BezierKnot> knots) {
-        distanceLUTGenerated = false;
         GetWeightsBezierKnots(new Matrix4x4(
             new Vector4(1f, 0f, 0f, 0f),
             new Vector4(-3f, 3f, 0f, 0f),
             new Vector4(3f, -6f, 3f, 0f),
             new Vector4(-1f, 3f, -3f, 1f)
         ), ref weights, knots);
+        GenerateDistanceLUT();
     }
     
     /// <summary>
@@ -229,13 +203,13 @@ public struct Spline {
     /// </summary>
     /// <param name="knots">Start Position, Start Velocity, End Velocity, End Position</param>
     public void SetFromHermiteKnots(IList<HermiteKnot> knots) {
-        distanceLUTGenerated = false;
         GetWeightsHermiteKnots(new Matrix4x4(
             new Vector4(1f, 0f, 0f, 0f),
             new Vector4(0f, 1f, 0f, 0f),
             new Vector4(-3f, -2f, -1f, 3f),
             new Vector4(2f, 1f, 1f, -2)
         ), ref weights, knots);
+        GenerateDistanceLUT();
     }
     
     /// <summary>
@@ -243,13 +217,13 @@ public struct Spline {
     /// </summary>
     /// <param name="positions">the anchor positions</param>
     private void SetFromBSplinePositionsLooped(IList<float> positions) {
-        distanceLUTGenerated = false;
         GetWeightsLooped(new Matrix4x4(
             new Vector4(1f, 4f, 1f, 0f) * 1f/6f,
             new Vector4(-3f, 0f, 3f, 0f) * 1f/6f,
             new Vector4(3f, -6f, 3f, 0f) * 1f/6f,
             new Vector4(-1f, 3f, -3f, 1f) * 1f/6f
         ), ref weights, positions);
+        GenerateDistanceLUT();
     }
     
     /// <summary>
@@ -259,13 +233,13 @@ public struct Spline {
     /// <param name="startHandle">handle for start position</param>
     /// <param name="endHandle">handle for end position</param>
     public void SetFromBSplinePositions(IList<float> positions, float startHandle, float endHandle) {
-        distanceLUTGenerated = false;
         GetWeightsWithEndHandles(new Matrix4x4(
             new Vector4(1f, 4f, 1f, 0f) * 1f/6f,
             new Vector4(-3f, 0f, 3f, 0f) * 1f/6f,
             new Vector4(3f, -6f, 3f, 0f) * 1f/6f,
             new Vector4(-1f, 3f, -3f, 1f) * 1f/6f
         ), ref weights, positions, startHandle, endHandle);
+        GenerateDistanceLUT();
     }
 
     /// <summary>
@@ -290,7 +264,6 @@ public struct Spline {
     /// <param name="positions">the anchor positions</param>
     /// <param name="tension">the tension of the spline</param>
     private void SetFromCardinalPositionsLooped(IList<float> positions, float tension) {
-        distanceLUTGenerated = false;
         float k = 1f - tension;
         GetWeightsLooped(new Matrix4x4(
             new Vector4(0f, 1f, 0f, 0f),
@@ -298,6 +271,7 @@ public struct Spline {
             new Vector4(k, -2.5f * k, 2f * k, -0.5f * k),
             new Vector4(-0.5f * k, 1.5f * k, -1.5f * k, 0.5f * k)
         ), ref weights, positions);
+        GenerateDistanceLUT();
     }
     
     /// <summary>
@@ -308,7 +282,6 @@ public struct Spline {
     /// <param name="endHandle">handle for end position</param>
     /// <param name="tension">the tension of the spline</param>
     public void SetFromCardinalPositions(IList<float> positions, float startHandle, float endHandle, float tension) {
-        distanceLUTGenerated = false;
         float k = 1f - tension;
         GetWeightsWithEndHandles(new Matrix4x4(
                 new Vector4(0f, 1f, 0f, 0f),
@@ -316,16 +289,17 @@ public struct Spline {
                 new Vector4(k, -2.5f * k, 2f * k, -0.5f * k),
                 new Vector4(-0.5f * k, 1.5f * k, -1.5f * k, 0.5f * k)
             ), ref weights, positions, startHandle, endHandle);
+        GenerateDistanceLUT();
     }
     
     private void SetFromLinearLooped(IList<float> positions) {
-        distanceLUTGenerated = false;
         GetWeightsLooped(new Matrix4x4(
             new Vector4(0f, 1f, 0f, 0f),
             new Vector4(0f, -1f, 1f, 0f),
             Vector4.zero,
             Vector4.zero 
         ), ref weights, positions);
+        GenerateDistanceLUT();
     }
     
     public void SetFromLinearPositions(IList<float> positions, bool looped = false) {
@@ -334,13 +308,13 @@ public struct Spline {
             return;
         }
         weights.Clear();
-        distanceLUTGenerated = false;
         GetWeightsWithEndHandles(new Matrix4x4(
             new Vector4(0f, 1f, 0f, 0f),
             new Vector4(0f, -1f, 1f, 0f),
             Vector4.zero,
             Vector4.zero 
         ), ref weights, positions, 0, 0);
+        GenerateDistanceLUT();
     }
     
     /// <summary>
@@ -365,13 +339,13 @@ public struct Spline {
     /// </summary>
     /// <param name="positions">the anchor positions</param>
     private void SetFromCatmullPositionsLooped(IList<float> positions) {
-        distanceLUTGenerated = false;
         GetWeightsLooped(new Matrix4x4(
             new Vector4(0f, 2f, 0f, 0f)*0.5f,
             new Vector4(-1f, 0f, 1f, 0f)*0.5f,
             new Vector4(2f, -5f, 4f, -1f)*0.5f,
             new Vector4(-1f, 3f, -3f, 1f)*0.5f
         ), ref weights, positions);
+        GenerateDistanceLUT();
     }
 
     /// <summary>
@@ -381,13 +355,13 @@ public struct Spline {
     /// <param name="startHandle">handle for start position</param>
     /// <param name="endHandle">handle for end position</param>
     public void SetFromCatmullPositions(IList<float> positions, float startHandle, float endHandle) {
-        distanceLUTGenerated = false;
         GetWeightsWithEndHandles(new Matrix4x4(
             new Vector4(0f, 2f, 0f, 0f)*0.5f,
             new Vector4(-1f, 0f, 1f, 0f)*0.5f,
             new Vector4(2f, -5f, 4f, -1f)*0.5f,
             new Vector4(-1f, 3f, -3f, 1f)*0.5f
         ), ref weights, positions, startHandle, endHandle);
+        GenerateDistanceLUT();
     }
 
     /// <summary>
